@@ -22,10 +22,11 @@ an Ed25519 key (`pynacl`) and calls the REST API via `requests`.
   (it gets committed) — set them as Secrets/env vars instead.
 
 ### Network egress (non-obvious, important)
-- The live API host `trading.robinhood.com` is NOT reachable by default from the
-  Cloud Agent VM (requests fail with `Connection reset by peer`). A real
-  authenticated call requires this domain to be added to the network allowlist.
-- The full local code path (key load → request signing → HTTPS call) can be
-  verified without real credentials by generating an ephemeral `SigningKey` and
-  confirming the signed request is built; only the outbound call to Robinhood is
-  gated by egress.
+- The live API host `trading.robinhood.com` IS reachable from the Cloud Agent VM.
+  A signed request reaches the real API: with an invalid/ephemeral key it returns
+  HTTP `401` ("An API credential matching the passed in api key was not found"),
+  and an unsigned request returns HTTP `400` ("Request missing required headers").
+- The full code path (key load → request signing → HTTPS call → API validation)
+  can be verified without real credentials by generating an ephemeral `SigningKey`
+  and confirming the API responds with a `401`; only a *successful authenticated*
+  response requires valid `ROBINHOOD_API_KEY` / `ROBINHOOD_BASE64_PRIVATE_KEY`.
