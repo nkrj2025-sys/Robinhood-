@@ -35,6 +35,7 @@ class StrategyConfig:
 class RuntimeConfig:
     strategy: StrategyConfig
     connectivity_check_only: bool = False
+    trade_audit_log_path: str = "logs/trade_audit.jsonl"
 
 
 class CryptoAPITradingV2:
@@ -314,6 +315,7 @@ def _load_strategy_config() -> RuntimeConfig:
     return RuntimeConfig(
         strategy=strategy,
         connectivity_check_only=os.environ.get("ROBINHOOD_CONNECTIVITY_CHECK_ONLY", "").lower() == "true",
+        trade_audit_log_path=os.environ.get("ROBINHOOD_TRADE_AUDIT_LOG_PATH", "logs/trade_audit.jsonl"),
     )
 
 
@@ -364,6 +366,19 @@ def _percent_move(current_price: Decimal, reference_price: Decimal) -> Decimal:
     return ((current_price - reference_price) / reference_price) * Decimal("100")
 
 
+def _append_audit_log(log_path: str, event: str, payload: Dict[str, Any]) -> None:
+    directory = os.path.dirname(log_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    record = {
+        "timestamp_utc": datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+        "event": event,
+        "payload": payload,
+    }
+    with open(log_path, "a", encoding="utf-8") as log_file:
+        log_file.write(json.dumps(record, default=str) + "\n")
+
+
 def main() -> None:
     _load_dotenv()
     api_key, base64_private_key = _load_validated_credentials()
@@ -393,6 +408,11 @@ def main() -> None:
 
     if runtime.connectivity_check_only:
         print("Connectivity check success. Exiting because ROBINHOOD_CONNECTIVITY_CHECK_ONLY=true.")
+        _append_audit_log(
+            runtime.trade_audit_log_path,
+            "connectivity_check",
+            {"status": "success", "symbol": config.symbol},
+        )
         return
 
     trading_pairs = api_trading_client.get_trading_pairs(config.symbol)
@@ -410,6 +430,11 @@ def main() -> None:
         mid_price = _extract_mid_price(best_bid_ask, config.symbol)
         if mid_price is None or mid_price <= 0:
             print(f"[{iteration}] Unable to determine market price: {best_bid_ask}")
+            _append_audit_log(
+                runtime.trade_audit_log_path,
+                "market_data_unavailable",
+                {"iteration": iteration, "symbol": config.symbol, "response": best_bid_ask},
+            )
             time.sleep(config.poll_interval_seconds)
             continue
 
@@ -427,12 +452,30 @@ def main() -> None:
                 f"[{iteration}] Trading halted: max loss reached "
                 f"(${strategy_pnl_usd.quantize(Decimal('0.01'))} <= -${config.max_loss_usd})."
             )
+            _append_audit_log(
+                runtime.trade_audit_log_path,
+                "risk_halt_max_loss",
+                {
+                    "iteration": iteration,
+                    "strategy_pnl_usd": str(strategy_pnl_usd.quantize(Decimal("0.01"))),
+                    "max_loss_usd": str(config.max_loss_usd),
+                },
+            )
             break
 
         if trades_executed >= config.max_trades_per_run:
             print(
                 f"[{iteration}] Trading halted: max trades per run reached "
                 f"({trades_executed}/{config.max_trades_per_run})."
+            )
+            _append_audit_log(
+                runtime.trade_audit_log_path,
+                "risk_halt_max_trades",
+                {
+                    "iteration": iteration,
+                    "trades_executed": trades_executed,
+                    "max_trades_per_run": config.max_trades_per_run,
+                },
             )
             break
 
@@ -451,6 +494,21 @@ def main() -> None:
                     f"[{iteration}] Cooling down. Next trade allowed at iteration "
                     f"{cooldown_until_iteration}."
                 )
+                _append_audit_log(
+                    runtime.trade_audit_log_path,
+                    "trade_skipped_cooldown",
+                    {
+                        "iteration": iteration,
+                        "signal": signal,
+                        "cooldown_until_iteration": cooldown_until_iteration,
+                    },
+                )
+            else:
+                _append_audit_log(
+                    runtime.trade_audit_log_path,
+                    "trade_skipped_hold",
+                    {"iteration": iteration, "signal": signal},
+                )
             time.sleep(config.poll_interval_seconds)
             continue
 
@@ -464,10 +522,33 @@ def main() -> None:
                     f"[{iteration}] Skip BUY: buying power ${buying_power_usd} below "
                     f"${config.trade_notional_usd}"
                 )
+                _append_audit_log(
+                    runtime.trade_audit_log_path,
+                    "trade_blocked_buying_power",
+                    {
+                        "iteration": iteration,
+                        "signal": "buy",
+                        "mid_price": str(mid_price),
+                        "buying_power_usd": str(buying_power_usd),
+                        "required_notional_usd": str(config.trade_notional_usd),
+                    },
+                )
             elif asset_position + asset_quantity > config.max_position_asset:
                 print(
                     f"[{iteration}] Skip BUY: position limit exceeded. "
                     f"Current={asset_position}, Max={config.max_position_asset}"
+                )
+                _append_audit_log(
+                    runtime.trade_audit_log_path,
+                    "trade_blocked_position_limit",
+                    {
+                        "iteration": iteration,
+                        "signal": "buy",
+                        "mid_price": str(mid_price),
+                        "asset_position": str(asset_position),
+                        "requested_asset_quantity": str(asset_quantity),
+                        "max_position_asset": str(config.max_position_asset),
+                    },
                 )
             else:
                 order_config = {"asset_quantity": _round_asset_quantity(asset_quantity)}
@@ -482,8 +563,26 @@ def main() -> None:
                     )
                     print(f"[{iteration}] BUY order response: {json.dumps(order_response)}")
                     buying_power_usd -= config.trade_notional_usd
+                    execution_mode = "live"
                 else:
                     print(f"[{iteration}] DRY RUN BUY => {order_config}")
+                    order_response = {"dry_run": True}
+                    execution_mode = "dry_run"
+                _append_audit_log(
+                    runtime.trade_audit_log_path,
+                    "trade_executed",
+                    {
+                        "iteration": iteration,
+                        "side": "buy",
+                        "symbol": config.symbol,
+                        "mid_price": str(mid_price),
+                        "signal": signal,
+                        "order_config": order_config,
+                        "execution_mode": execution_mode,
+                        "strategy_pnl_usd": str(strategy_pnl_usd.quantize(Decimal("0.01"))),
+                        "response": order_response,
+                    },
+                )
                 previous_notional = managed_avg_entry_price * managed_position_qty
                 managed_position_qty += asset_quantity
                 if managed_position_qty > 0:
@@ -496,6 +595,17 @@ def main() -> None:
             asset_quantity = min(config.trade_notional_usd / mid_price, sell_cap)
             if asset_quantity <= 0:
                 print(f"[{iteration}] Skip SELL: no {asset_code} position available")
+                _append_audit_log(
+                    runtime.trade_audit_log_path,
+                    "trade_blocked_no_position",
+                    {
+                        "iteration": iteration,
+                        "signal": "sell",
+                        "asset_code": asset_code,
+                        "asset_position": str(asset_position),
+                        "managed_position_qty": str(managed_position_qty),
+                    },
+                )
             else:
                 order_config = {"asset_quantity": _round_asset_quantity(asset_quantity)}
                 if config.place_real_order:
@@ -508,10 +618,28 @@ def main() -> None:
                         order_config=order_config,
                     )
                     print(f"[{iteration}] SELL order response: {json.dumps(order_response)}")
+                    execution_mode = "live"
                 else:
                     print(f"[{iteration}] DRY RUN SELL => {order_config}")
+                    order_response = {"dry_run": True}
+                    execution_mode = "dry_run"
                 if managed_avg_entry_price > 0:
                     realized_pnl_usd += (mid_price - managed_avg_entry_price) * asset_quantity
+                _append_audit_log(
+                    runtime.trade_audit_log_path,
+                    "trade_executed",
+                    {
+                        "iteration": iteration,
+                        "side": "sell",
+                        "symbol": config.symbol,
+                        "mid_price": str(mid_price),
+                        "signal": signal,
+                        "order_config": order_config,
+                        "execution_mode": execution_mode,
+                        "strategy_pnl_usd": str(strategy_pnl_usd.quantize(Decimal("0.01"))),
+                        "response": order_response,
+                    },
+                )
                 managed_position_qty = max(managed_position_qty - asset_quantity, Decimal("0"))
                 if managed_position_qty == 0:
                     managed_avg_entry_price = Decimal("0")

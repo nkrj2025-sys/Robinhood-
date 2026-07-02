@@ -43,6 +43,7 @@ Optional strategy variables:
 - `ROBINHOOD_COOLDOWN_ITERATIONS` (default: `2`)
 - `ROBINHOOD_PLACE_REAL_ORDER` (default: `false`)
 - `ROBINHOOD_CONNECTIVITY_CHECK_ONLY` (default: `false`)
+- `ROBINHOOD_TRADE_AUDIT_LOG_PATH` (default: `logs/trade_audit.jsonl`)
 
 `ROBINHOOD_PLACE_REAL_ORDER=true` enables live orders. Keep it `false` while tuning.
 
@@ -51,6 +52,11 @@ For a credentials/network smoke test without running strategy loop:
 ```bash
 ROBINHOOD_CONNECTIVITY_CHECK_ONLY=true python3 robinhood-api-trading/robinhood_api_trading_v2.py
 ```
+
+### Order decision audit log
+
+Every cycle writes JSONL audit entries (trade executed, skipped, blocked by risk checks,
+or halted by guardrails) to `logs/trade_audit.jsonl` by default.
 
 ### Lower-loss starter profile
 
