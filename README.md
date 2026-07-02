@@ -36,6 +36,11 @@ Optional strategy variables:
 - `ROBINHOOD_MAX_POSITION_ASSET` (default: `0.01`)
 - `ROBINHOOD_MAX_ITERATIONS` (default: `50`)
 - `ROBINHOOD_POLL_INTERVAL_SECONDS` (default: `20`)
+- `ROBINHOOD_STOP_LOSS_PCT` (default: `1.00`)
+- `ROBINHOOD_TAKE_PROFIT_PCT` (default: `1.50`)
+- `ROBINHOOD_MAX_LOSS_USD` (default: `20`)
+- `ROBINHOOD_MAX_TRADES_PER_RUN` (default: `6`)
+- `ROBINHOOD_COOLDOWN_ITERATIONS` (default: `2`)
 - `ROBINHOOD_PLACE_REAL_ORDER` (default: `false`)
 - `ROBINHOOD_CONNECTIVITY_CHECK_ONLY` (default: `false`)
 
@@ -45,4 +50,17 @@ For a credentials/network smoke test without running strategy loop:
 
 ```bash
 ROBINHOOD_CONNECTIVITY_CHECK_ONLY=true python3 robinhood-api-trading/robinhood_api_trading_v2.py
+```
+
+### Lower-loss starter profile
+
+```bash
+ROBINHOOD_TRADE_NOTIONAL_USD=5
+ROBINHOOD_MAX_POSITION_ASSET=0.002
+ROBINHOOD_STOP_LOSS_PCT=0.50
+ROBINHOOD_TAKE_PROFIT_PCT=0.80
+ROBINHOOD_MAX_LOSS_USD=5
+ROBINHOOD_MAX_TRADES_PER_RUN=3
+ROBINHOOD_COOLDOWN_ITERATIONS=4
+ROBINHOOD_PLACE_REAL_ORDER=false
 ```

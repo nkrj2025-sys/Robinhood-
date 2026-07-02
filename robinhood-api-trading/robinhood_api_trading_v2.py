@@ -24,6 +24,11 @@ class StrategyConfig:
     max_iterations: int = 50
     poll_interval_seconds: int = 20
     place_real_order: bool = False
+    stop_loss_pct: Decimal = Decimal("1.00")
+    take_profit_pct: Decimal = Decimal("1.50")
+    max_loss_usd: Decimal = Decimal("20")
+    max_trades_per_run: int = 6
+    cooldown_iterations: int = 2
 
 
 @dataclass
@@ -300,6 +305,11 @@ def _load_strategy_config() -> RuntimeConfig:
         max_iterations=_env_int("ROBINHOOD_MAX_ITERATIONS", default=50, minimum=1),
         poll_interval_seconds=_env_int("ROBINHOOD_POLL_INTERVAL_SECONDS", default=20, minimum=1),
         place_real_order=os.environ.get("ROBINHOOD_PLACE_REAL_ORDER", "").lower() == "true",
+        stop_loss_pct=_to_decimal(os.environ.get("ROBINHOOD_STOP_LOSS_PCT", "1.00")),
+        take_profit_pct=_to_decimal(os.environ.get("ROBINHOOD_TAKE_PROFIT_PCT", "1.50")),
+        max_loss_usd=_to_decimal(os.environ.get("ROBINHOOD_MAX_LOSS_USD", "20")),
+        max_trades_per_run=_env_int("ROBINHOOD_MAX_TRADES_PER_RUN", default=6, minimum=1),
+        cooldown_iterations=_env_int("ROBINHOOD_COOLDOWN_ITERATIONS", default=2, minimum=0),
     )
     return RuntimeConfig(
         strategy=strategy,
@@ -348,6 +358,12 @@ def _round_asset_quantity(asset_quantity: Decimal) -> str:
     return str(asset_quantity.quantize(Decimal("0.00000001")))
 
 
+def _percent_move(current_price: Decimal, reference_price: Decimal) -> Decimal:
+    if reference_price <= 0:
+        return Decimal("0")
+    return ((current_price - reference_price) / reference_price) * Decimal("100")
+
+
 def main() -> None:
     _load_dotenv()
     api_key, base64_private_key = _load_validated_credentials()
@@ -383,6 +399,12 @@ def main() -> None:
     print(f"Loaded trading pairs: {len(trading_pairs)}")
 
     prices: Deque[Decimal] = deque(maxlen=config.lookback_ticks)
+    managed_position_qty = Decimal("0")
+    managed_avg_entry_price = Decimal("0")
+    realized_pnl_usd = Decimal("0")
+    trades_executed = 0
+    cooldown_until_iteration = 0
+
     for iteration in range(1, config.max_iterations + 1):
         best_bid_ask = api_trading_client.get_best_bid_ask(config.symbol)
         mid_price = _extract_mid_price(best_bid_ask, config.symbol)
@@ -393,9 +415,42 @@ def main() -> None:
 
         prices.append(mid_price)
         signal = _derive_signal(prices, config.momentum_threshold_pct)
-        print(f"[{iteration}] Mid={mid_price} Signal={signal}")
+        unrealized_pnl_usd = (mid_price - managed_avg_entry_price) * managed_position_qty
+        strategy_pnl_usd = realized_pnl_usd + unrealized_pnl_usd
+        print(
+            f"[{iteration}] Mid={mid_price} Signal={signal} "
+            f"PnL=${strategy_pnl_usd.quantize(Decimal('0.01'))}"
+        )
 
-        if signal == "hold":
+        if strategy_pnl_usd <= (config.max_loss_usd * Decimal("-1")):
+            print(
+                f"[{iteration}] Trading halted: max loss reached "
+                f"(${strategy_pnl_usd.quantize(Decimal('0.01'))} <= -${config.max_loss_usd})."
+            )
+            break
+
+        if trades_executed >= config.max_trades_per_run:
+            print(
+                f"[{iteration}] Trading halted: max trades per run reached "
+                f"({trades_executed}/{config.max_trades_per_run})."
+            )
+            break
+
+        if managed_position_qty > 0 and managed_avg_entry_price > 0:
+            move_pct = _percent_move(mid_price, managed_avg_entry_price)
+            if move_pct <= (config.stop_loss_pct * Decimal("-1")):
+                signal = "sell"
+                print(f"[{iteration}] Stop-loss triggered at {move_pct.quantize(Decimal('0.01'))}%.")
+            elif move_pct >= config.take_profit_pct:
+                signal = "sell"
+                print(f"[{iteration}] Take-profit triggered at {move_pct.quantize(Decimal('0.01'))}%.")
+
+        if signal == "hold" or iteration < cooldown_until_iteration:
+            if iteration < cooldown_until_iteration:
+                print(
+                    f"[{iteration}] Cooling down. Next trade allowed at iteration "
+                    f"{cooldown_until_iteration}."
+                )
             time.sleep(config.poll_interval_seconds)
             continue
 
@@ -429,9 +484,16 @@ def main() -> None:
                     buying_power_usd -= config.trade_notional_usd
                 else:
                     print(f"[{iteration}] DRY RUN BUY => {order_config}")
+                previous_notional = managed_avg_entry_price * managed_position_qty
+                managed_position_qty += asset_quantity
+                if managed_position_qty > 0:
+                    managed_avg_entry_price = (previous_notional + (asset_quantity * mid_price)) / managed_position_qty
+                trades_executed += 1
+                cooldown_until_iteration = iteration + config.cooldown_iterations + 1
 
         elif signal == "sell":
-            asset_quantity = min(config.trade_notional_usd / mid_price, asset_position)
+            sell_cap = managed_position_qty if managed_position_qty > 0 else asset_position
+            asset_quantity = min(config.trade_notional_usd / mid_price, sell_cap)
             if asset_quantity <= 0:
                 print(f"[{iteration}] Skip SELL: no {asset_code} position available")
             else:
@@ -448,6 +510,13 @@ def main() -> None:
                     print(f"[{iteration}] SELL order response: {json.dumps(order_response)}")
                 else:
                     print(f"[{iteration}] DRY RUN SELL => {order_config}")
+                if managed_avg_entry_price > 0:
+                    realized_pnl_usd += (mid_price - managed_avg_entry_price) * asset_quantity
+                managed_position_qty = max(managed_position_qty - asset_quantity, Decimal("0"))
+                if managed_position_qty == 0:
+                    managed_avg_entry_price = Decimal("0")
+                trades_executed += 1
+                cooldown_until_iteration = iteration + config.cooldown_iterations + 1
 
         time.sleep(config.poll_interval_seconds)
 
