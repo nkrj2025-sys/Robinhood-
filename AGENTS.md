@@ -27,6 +27,20 @@ Ed25519 key (`pynacl`) and call the REST API via `requests`.
   `main()` fails at `base64.b64decode(...)`. Do NOT hardcode real keys into the file
   (it gets committed) — set them as Secrets/env vars instead.
 
+### Docker (non-obvious, important)
+- Docker CE + Compose plugin are installed at the system level (captured in the VM
+ snapshot), so they are NOT part of the update script. The repo itself does not use
+ Docker; it's available as a general dev tool.
+- The daemon is NOT auto-started (there is no systemd/service manager in the VM).
+ Start it manually and leave it running, e.g. in a background/tmux session:
+ `sudo dockerd > /tmp/dockerd.log 2>&1 &`.
+- DinD requires two workarounds already configured: `storage-driver: fuse-overlayfs`
+ in `/etc/docker/daemon.json`, and `iptables`/`ip6tables` set to `-legacy` (container
+ port publishing/NAT fails otherwise). If Docker 29+ is ever installed, also disable
+ the `containerd-snapshotter` feature to keep fuse-overlayfs working.
+- The `ubuntu` user is in the `docker` group, but that membership is not active in an
+ already-open shell; use `sudo docker ...` in the current session (or a fresh login).
+
 ### Network egress (non-obvious, important)
 - The live API host `trading.robinhood.com` IS reachable from the Cloud Agent VM.
   A signed request reaches the real API: with an invalid/ephemeral key it returns
