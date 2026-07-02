@@ -39,6 +39,7 @@ class RuntimeConfig:
     strategy: StrategyConfig
     connectivity_check_only: bool = False
     trade_audit_log_path: str = "logs/trade_audit.jsonl"
+    allowed_symbols: Tuple[str, ...] = ()
 
 
 class CryptoAPITradingV2:
@@ -335,10 +336,18 @@ def _load_strategy_config() -> RuntimeConfig:
             os.environ.get("ROBINHOOD_MAX_ESTIMATED_PRICE_DEVIATION_PCT", "0.75")
         ),
     )
+    raw_allowed_symbols = os.environ.get("ROBINHOOD_WATCHLIST_SYMBOLS", "")
+    allowed_symbols = tuple(
+        symbol.strip().upper()
+        for symbol in raw_allowed_symbols.split(",")
+        if symbol.strip()
+    )
+
     return RuntimeConfig(
         strategy=strategy,
         connectivity_check_only=os.environ.get("ROBINHOOD_CONNECTIVITY_CHECK_ONLY", "").lower() == "true",
         trade_audit_log_path=os.environ.get("ROBINHOOD_TRADE_AUDIT_LOG_PATH", "logs/trade_audit.jsonl"),
+        allowed_symbols=allowed_symbols,
     )
 
 
@@ -464,6 +473,21 @@ def main() -> None:
         "Execution mode => "
         + ("LIVE ORDERS ENABLED" if config.place_real_order else "DRY RUN (no live orders)")
     )
+    if runtime.allowed_symbols:
+        print(f"Watchlist gate active => allowed symbols: {', '.join(runtime.allowed_symbols)}")
+
+    symbol_key = config.symbol.upper()
+    if runtime.allowed_symbols and symbol_key not in runtime.allowed_symbols:
+        print(f"Blocked: symbol {config.symbol} is not in ROBINHOOD_WATCHLIST_SYMBOLS.")
+        _append_audit_log(
+            runtime.trade_audit_log_path,
+            "startup_blocked_watchlist_gate",
+            {
+                "symbol": config.symbol,
+                "allowed_symbols": list(runtime.allowed_symbols),
+            },
+        )
+        return
 
     if runtime.connectivity_check_only:
         print("Connectivity check success. Exiting because ROBINHOOD_CONNECTIVITY_CHECK_ONLY=true.")

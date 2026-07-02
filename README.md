@@ -44,6 +44,7 @@ Optional strategy variables:
 - `ROBINHOOD_MAX_SPREAD_PCT` (default: `0.40`)
 - `ROBINHOOD_REQUIRE_ESTIMATED_PRICE_CHECK` (default: `true`)
 - `ROBINHOOD_MAX_ESTIMATED_PRICE_DEVIATION_PCT` (default: `0.75`)
+- `ROBINHOOD_WATCHLIST_SYMBOLS` (comma-separated allowed symbols; if set, `ROBINHOOD_SYMBOL` must be included)
 - `ROBINHOOD_PLACE_REAL_ORDER` (default: `false`)
 - `ROBINHOOD_CONNECTIVITY_CHECK_ONLY` (default: `false`)
 - `ROBINHOOD_TRADE_AUDIT_LOG_PATH` (default: `logs/trade_audit.jsonl`)
@@ -67,6 +68,8 @@ or halted by guardrails) to `logs/trade_audit.jsonl` by default.
 - estimated price review must pass (`ROBINHOOD_REQUIRE_ESTIMATED_PRICE_CHECK=true`)
 - estimated-vs-mid deviation must be within limit
   (`ROBINHOOD_MAX_ESTIMATED_PRICE_DEVIATION_PCT`)
+- symbol must pass watchlist gate when configured
+  (`ROBINHOOD_WATCHLIST_SYMBOLS`)
 
 ### Lower-loss starter profile
 
@@ -81,5 +84,6 @@ ROBINHOOD_COOLDOWN_ITERATIONS=4
 ROBINHOOD_MAX_SPREAD_PCT=0.20
 ROBINHOOD_REQUIRE_ESTIMATED_PRICE_CHECK=true
 ROBINHOOD_MAX_ESTIMATED_PRICE_DEVIATION_PCT=0.50
+ROBINHOOD_WATCHLIST_SYMBOLS=BTC-USD,ETH-USD
 ROBINHOOD_PLACE_REAL_ORDER=false
 ```
