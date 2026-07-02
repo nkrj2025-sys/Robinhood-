@@ -94,11 +94,13 @@ class CryptoAPITradingV2:
         path = f"/api/v2/crypto/trading/trading_pairs/{query_params}"
 
         all_results: List[Dict[str, Any]] = []
+        visited_paths = {path}
         response = self.make_api_request("GET", path)
-        if isinstance(response, dict) and response.get("error"):
-            raise RuntimeError(response["error"])
 
         while isinstance(response, dict):
+            if response.get("error"):
+                raise RuntimeError(response["error"])
+
             results = response.get("results", [])
             if isinstance(results, list):
                 all_results.extend(results)
@@ -108,6 +110,9 @@ class CryptoAPITradingV2:
                 break
 
             next_path = next_url.replace(self.base_url, "")
+            if next_path in visited_paths:
+                raise RuntimeError(f"Pagination loop detected for {next_path}")
+            visited_paths.add(next_path)
             response = self.make_api_request("GET", next_path)
 
         return all_results

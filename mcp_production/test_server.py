@@ -66,9 +66,10 @@ def test_fetch_json_with_mocked_http(monkeypatch):
         def json():
             return {"hello": "world"}
 
-    def mock_get(url, timeout):
+    def mock_get(url, timeout, allow_redirects):
         assert url == "https://jsonplaceholder.typicode.com/todos/1"
         assert timeout == server.REQUEST_TIMEOUT_SEC
+        assert allow_redirects is False
         return MockResponse()
 
     monkeypatch.setattr(server.requests, "get", mock_get)

@@ -1,6 +1,5 @@
 {
   "setup-worktree": [
-    "npm ci",
     "cp $ROOT_WORKTREE_PATH/.env .env"
   ]
 }

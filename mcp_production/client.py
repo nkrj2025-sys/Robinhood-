@@ -9,7 +9,25 @@ from mcp.client.stdio import stdio_client
 
 async def call_tool(session: ClientSession, tool_name: str, args: dict[str, Any]) -> Any:
     result = await session.call_tool(tool_name, args)
-    return result.content
+    structured_content = getattr(result, "structuredContent", None)
+    if structured_content is not None:
+        return structured_content
+
+    decoded_blocks: list[Any] = []
+    for block in result.content:
+        text = getattr(block, "text", None)
+        if text is None:
+            decoded_blocks.append(
+                block.model_dump() if hasattr(block, "model_dump") else str(block)
+            )
+            continue
+
+        try:
+            decoded_blocks.append(json.loads(text))
+        except json.JSONDecodeError:
+            decoded_blocks.append(text)
+
+    return decoded_blocks[0] if len(decoded_blocks) == 1 else decoded_blocks
 
 
 async def main() -> None:

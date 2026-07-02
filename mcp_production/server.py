@@ -8,7 +8,7 @@ import time
 from collections import defaultdict, deque
 from contextlib import closing
 from typing import Any, Dict, Literal
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
 from dotenv import load_dotenv
@@ -54,7 +54,7 @@ class CustomerOut(BaseModel):
 class FetchJsonOut(BaseModel):
     url: str
     status_code: int
-    data: dict[str, Any]
+    data: Any
 
 
 def _is_valid_email(email: str) -> bool:
@@ -130,6 +130,26 @@ def get_query_params(params_dict: Dict[str, Any]) -> str:
     return "?" + urlencode(query_pairs)
 
 
+def _fetch_allowed_url(url: str) -> requests.Response:
+    current_url = url
+    for _ in range(5):
+        _validate_url(current_url)
+        response = requests.get(
+            current_url,
+            timeout=REQUEST_TIMEOUT_SEC,
+            allow_redirects=False,
+        )
+        if not 300 <= response.status_code < 400:
+            return response
+
+        location = response.headers.get("Location")
+        if not location:
+            raise RuntimeError("Redirect response missing Location header")
+        current_url = urljoin(current_url, location)
+
+    raise RuntimeError("Too many redirects")
+
+
 @mcp.tool()
 def healthcheck() -> dict[str, Any]:
     return {
@@ -143,9 +163,8 @@ def healthcheck() -> dict[str, Any]:
 def fetch_json(url: str, token: str) -> dict[str, Any]:
     _require_token(token)
     _check_rate_limit(token)
-    _validate_url(url)
 
-    response = requests.get(url, timeout=REQUEST_TIMEOUT_SEC)
+    response = _fetch_allowed_url(url)
     response.raise_for_status()
 
     output = FetchJsonOut(url=url, status_code=response.status_code, data=response.json())
@@ -166,29 +185,21 @@ def upsert_customer(customer: dict[str, Any], token: str) -> dict[str, Any]:
         raise ValueError("Invalid customer payload: email must be a valid address")
 
     with closing(_db()) as conn:
-        existing = conn.execute(
-            "SELECT id FROM customers WHERE email = ?",
-            (validated.email,),
-        ).fetchone()
-
-        if existing:
-            conn.execute(
-                "UPDATE customers SET name = ?, status = ? WHERE email = ?",
-                (validated.name, validated.status, validated.email),
-            )
-            customer_id = existing["id"]
-        else:
-            result = conn.execute(
-                "INSERT INTO customers (name, email, status) VALUES (?, ?, ?)",
-                (validated.name, validated.email, validated.status),
-            )
-            customer_id = result.lastrowid
-
+        conn.execute(
+            """
+            INSERT INTO customers (name, email, status)
+            VALUES (?, ?, ?)
+            ON CONFLICT(email) DO UPDATE SET
+                name = excluded.name,
+                status = excluded.status
+            """,
+            (validated.name, validated.email, validated.status),
+        )
         conn.commit()
 
         row = conn.execute(
-            "SELECT id, name, email, status FROM customers WHERE id = ?",
-            (customer_id,),
+            "SELECT id, name, email, status FROM customers WHERE email = ?",
+            (validated.email,),
         ).fetchone()
 
     return CustomerOut(**dict(row)).model_dump()

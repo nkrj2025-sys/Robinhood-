@@ -42,7 +42,10 @@ class CryptoAPITrading:
             if method == "GET":
                 response = requests.get(url, headers=headers, timeout=10)
             elif method == "POST":
-                response = requests.post(url, headers=headers, json=json.loads(body), timeout=10)
+                if body:
+                    response = requests.post(url, headers=headers, json=json.loads(body), timeout=10)
+                else:
+                    response = requests.post(url, headers=headers, timeout=10)
             return response.json()
         except requests.RequestException as e:
             print(f"Error making API request: {e}")
