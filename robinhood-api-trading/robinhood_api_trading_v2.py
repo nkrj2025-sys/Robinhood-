@@ -361,8 +361,24 @@ def _load_validated_credentials() -> Tuple[str, str]:
             "via environment or a local .env file."
         )
 
-    if api_key.startswith("ADD YOUR") or base64_private_key.startswith("ADD YOUR"):
-        raise ValueError("Detected placeholder credentials. Replace with real secret values.")
+    placeholder_values = {
+        "add your api key here",
+        "add your private key here",
+        "your_api_key_here",
+        "your_base64_ed25519_seed_here",
+        "replace_me",
+        "changeme",
+    }
+    if (
+        api_key.lower() in placeholder_values
+        or base64_private_key.lower() in placeholder_values
+        or api_key.startswith("ADD YOUR")
+        or base64_private_key.startswith("ADD YOUR")
+    ):
+        raise ValueError(
+            "Detected placeholder credentials (e.g. 'your_base64_ed25519_seed_here'). "
+            "Replace with real secret values."
+        )
 
     try:
         private_key_seed = base64.b64decode(base64_private_key)
