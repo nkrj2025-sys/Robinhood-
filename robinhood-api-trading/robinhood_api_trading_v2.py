@@ -26,6 +26,12 @@ class StrategyConfig:
     place_real_order: bool = False
 
 
+@dataclass
+class RuntimeConfig:
+    strategy: StrategyConfig
+    connectivity_check_only: bool = False
+
+
 class CryptoAPITradingV2:
     def __init__(self, api_key: str, base64_private_key: str):
         if not api_key:
@@ -267,8 +273,25 @@ def _env_int(name: str, default: int, minimum: int) -> int:
         return default
 
 
-def _load_strategy_config() -> StrategyConfig:
-    return StrategyConfig(
+def _load_dotenv(dotenv_path: str = ".env") -> None:
+    if not os.path.exists(dotenv_path):
+        return
+
+    with open(dotenv_path, "r", encoding="utf-8") as dotenv_file:
+        for raw_line in dotenv_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+def _load_strategy_config() -> RuntimeConfig:
+    strategy = StrategyConfig(
         symbol=os.environ.get("ROBINHOOD_SYMBOL", "BTC-USD"),
         lookback_ticks=_env_int("ROBINHOOD_LOOKBACK_TICKS", default=8, minimum=2),
         momentum_threshold_pct=_to_decimal(os.environ.get("ROBINHOOD_MOMENTUM_THRESHOLD_PCT", "0.20")),
@@ -278,6 +301,36 @@ def _load_strategy_config() -> StrategyConfig:
         poll_interval_seconds=_env_int("ROBINHOOD_POLL_INTERVAL_SECONDS", default=20, minimum=1),
         place_real_order=os.environ.get("ROBINHOOD_PLACE_REAL_ORDER", "").lower() == "true",
     )
+    return RuntimeConfig(
+        strategy=strategy,
+        connectivity_check_only=os.environ.get("ROBINHOOD_CONNECTIVITY_CHECK_ONLY", "").lower() == "true",
+    )
+
+
+def _load_validated_credentials() -> Tuple[str, str]:
+    api_key = os.environ.get("ROBINHOOD_API_KEY", "").strip()
+    base64_private_key = os.environ.get("ROBINHOOD_BASE64_PRIVATE_KEY", "").strip()
+
+    if not api_key or not base64_private_key:
+        raise ValueError(
+            "Missing credentials. Set ROBINHOOD_API_KEY and ROBINHOOD_BASE64_PRIVATE_KEY "
+            "via environment or a local .env file."
+        )
+
+    if api_key.startswith("ADD YOUR") or base64_private_key.startswith("ADD YOUR"):
+        raise ValueError("Detected placeholder credentials. Replace with real secret values.")
+
+    try:
+        private_key_seed = base64.b64decode(base64_private_key)
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        raise ValueError("ROBINHOOD_BASE64_PRIVATE_KEY is not valid base64.") from error
+
+    if len(private_key_seed) != 32:
+        raise ValueError(
+            "ROBINHOOD_BASE64_PRIVATE_KEY must decode to a 32-byte Ed25519 seed."
+        )
+
+    return api_key, base64_private_key
 
 
 def _derive_signal(price_window: Deque[Decimal], threshold_pct: Decimal) -> str:
@@ -296,16 +349,12 @@ def _round_asset_quantity(asset_quantity: Decimal) -> str:
 
 
 def main() -> None:
-    api_key = os.environ.get("ROBINHOOD_API_KEY", "")
-    base64_private_key = os.environ.get("ROBINHOOD_BASE64_PRIVATE_KEY", "")
-
-    if not api_key or not base64_private_key:
-        raise ValueError(
-            "Set ROBINHOOD_API_KEY and ROBINHOOD_BASE64_PRIVATE_KEY before running."
-        )
+    _load_dotenv()
+    api_key, base64_private_key = _load_validated_credentials()
 
     api_trading_client = CryptoAPITradingV2(api_key=api_key, base64_private_key=base64_private_key)
-    config = _load_strategy_config()
+    runtime = _load_strategy_config()
+    config = runtime.strategy
 
     accounts = api_trading_client.get_accounts()
     if not isinstance(accounts, dict) or "results" not in accounts or not accounts["results"]:
@@ -325,6 +374,10 @@ def main() -> None:
         "Execution mode => "
         + ("LIVE ORDERS ENABLED" if config.place_real_order else "DRY RUN (no live orders)")
     )
+
+    if runtime.connectivity_check_only:
+        print("Connectivity check success. Exiting because ROBINHOOD_CONNECTIVITY_CHECK_ONLY=true.")
+        return
 
     trading_pairs = api_trading_client.get_trading_pairs(config.symbol)
     print(f"Loaded trading pairs: {len(trading_pairs)}")

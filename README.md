@@ -12,9 +12,21 @@ Crypto trading bot using Robinhood's crypto API with:
 python3 robinhood-api-trading/robinhood_api_trading_v2.py
 ```
 
-Required environment variables:
+### Credentials and env loading
+
+The script auto-loads a local `.env` file (if present) before reading environment variables.
+`.env` is ignored by git.
+
+Required credentials:
 - `ROBINHOOD_API_KEY`
 - `ROBINHOOD_BASE64_PRIVATE_KEY`
+
+Example `.env`:
+
+```bash
+ROBINHOOD_API_KEY=your_api_key_here
+ROBINHOOD_BASE64_PRIVATE_KEY=your_base64_ed25519_seed_here
+```
 
 Optional strategy variables:
 - `ROBINHOOD_SYMBOL` (default: `BTC-USD`)
@@ -25,5 +37,12 @@ Optional strategy variables:
 - `ROBINHOOD_MAX_ITERATIONS` (default: `50`)
 - `ROBINHOOD_POLL_INTERVAL_SECONDS` (default: `20`)
 - `ROBINHOOD_PLACE_REAL_ORDER` (default: `false`)
+- `ROBINHOOD_CONNECTIVITY_CHECK_ONLY` (default: `false`)
 
 `ROBINHOOD_PLACE_REAL_ORDER=true` enables live orders. Keep it `false` while tuning.
+
+For a credentials/network smoke test without running strategy loop:
+
+```bash
+ROBINHOOD_CONNECTIVITY_CHECK_ONLY=true python3 robinhood-api-trading/robinhood_api_trading_v2.py
+```
