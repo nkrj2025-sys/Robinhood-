@@ -41,6 +41,9 @@ Optional strategy variables:
 - `ROBINHOOD_MAX_LOSS_USD` (default: `20`)
 - `ROBINHOOD_MAX_TRADES_PER_RUN` (default: `6`)
 - `ROBINHOOD_COOLDOWN_ITERATIONS` (default: `2`)
+- `ROBINHOOD_MAX_SPREAD_PCT` (default: `0.40`)
+- `ROBINHOOD_REQUIRE_ESTIMATED_PRICE_CHECK` (default: `true`)
+- `ROBINHOOD_MAX_ESTIMATED_PRICE_DEVIATION_PCT` (default: `0.75`)
 - `ROBINHOOD_PLACE_REAL_ORDER` (default: `false`)
 - `ROBINHOOD_CONNECTIVITY_CHECK_ONLY` (default: `false`)
 - `ROBINHOOD_TRADE_AUDIT_LOG_PATH` (default: `logs/trade_audit.jsonl`)
@@ -58,6 +61,13 @@ ROBINHOOD_CONNECTIVITY_CHECK_ONLY=true python3 robinhood-api-trading/robinhood_a
 Every cycle writes JSONL audit entries (trade executed, skipped, blocked by risk checks,
 or halted by guardrails) to `logs/trade_audit.jsonl` by default.
 
+### Pre-trade safety gates (before any order)
+
+- spread filter must pass (`ROBINHOOD_MAX_SPREAD_PCT`)
+- estimated price review must pass (`ROBINHOOD_REQUIRE_ESTIMATED_PRICE_CHECK=true`)
+- estimated-vs-mid deviation must be within limit
+  (`ROBINHOOD_MAX_ESTIMATED_PRICE_DEVIATION_PCT`)
+
 ### Lower-loss starter profile
 
 ```bash
@@ -68,5 +78,8 @@ ROBINHOOD_TAKE_PROFIT_PCT=0.80
 ROBINHOOD_MAX_LOSS_USD=5
 ROBINHOOD_MAX_TRADES_PER_RUN=3
 ROBINHOOD_COOLDOWN_ITERATIONS=4
+ROBINHOOD_MAX_SPREAD_PCT=0.20
+ROBINHOOD_REQUIRE_ESTIMATED_PRICE_CHECK=true
+ROBINHOOD_MAX_ESTIMATED_PRICE_DEVIATION_PCT=0.50
 ROBINHOOD_PLACE_REAL_ORDER=false
 ```

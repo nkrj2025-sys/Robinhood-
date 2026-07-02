@@ -29,6 +29,9 @@ class StrategyConfig:
     max_loss_usd: Decimal = Decimal("20")
     max_trades_per_run: int = 6
     cooldown_iterations: int = 2
+    max_spread_pct: Decimal = Decimal("0.40")
+    require_estimated_price_check: bool = True
+    max_estimated_price_deviation_pct: Decimal = Decimal("0.75")
 
 
 @dataclass
@@ -209,6 +212,14 @@ def _to_decimal(value: Any, default: Decimal = Decimal("0")) -> Decimal:
 
 
 def _extract_mid_price(best_bid_ask_response: Dict[str, Any], symbol: str) -> Optional[Decimal]:
+    bid_ask = _extract_bid_ask(best_bid_ask_response, symbol)
+    if bid_ask is None:
+        return None
+    bid, ask = bid_ask
+    return (bid + ask) / Decimal("2")
+
+
+def _extract_bid_ask(best_bid_ask_response: Dict[str, Any], symbol: str) -> Optional[Tuple[Decimal, Decimal]]:
     results = best_bid_ask_response.get("results", []) if isinstance(best_bid_ask_response, dict) else []
     if not isinstance(results, list):
         return None
@@ -228,7 +239,7 @@ def _extract_mid_price(best_bid_ask_response: Dict[str, Any], symbol: str) -> Op
             or row.get("ask_price")
         )
         if bid > 0 and ask > 0:
-            return (bid + ask) / Decimal("2")
+            return bid, ask
     return None
 
 
@@ -279,6 +290,13 @@ def _env_int(name: str, default: int, minimum: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _load_dotenv(dotenv_path: str = ".env") -> None:
     if not os.path.exists(dotenv_path):
         return
@@ -311,6 +329,11 @@ def _load_strategy_config() -> RuntimeConfig:
         max_loss_usd=_to_decimal(os.environ.get("ROBINHOOD_MAX_LOSS_USD", "20")),
         max_trades_per_run=_env_int("ROBINHOOD_MAX_TRADES_PER_RUN", default=6, minimum=1),
         cooldown_iterations=_env_int("ROBINHOOD_COOLDOWN_ITERATIONS", default=2, minimum=0),
+        max_spread_pct=_to_decimal(os.environ.get("ROBINHOOD_MAX_SPREAD_PCT", "0.40")),
+        require_estimated_price_check=_env_bool("ROBINHOOD_REQUIRE_ESTIMATED_PRICE_CHECK", True),
+        max_estimated_price_deviation_pct=_to_decimal(
+            os.environ.get("ROBINHOOD_MAX_ESTIMATED_PRICE_DEVIATION_PCT", "0.75")
+        ),
     )
     return RuntimeConfig(
         strategy=strategy,
@@ -366,6 +389,42 @@ def _percent_move(current_price: Decimal, reference_price: Decimal) -> Decimal:
     return ((current_price - reference_price) / reference_price) * Decimal("100")
 
 
+def _spread_pct(bid: Decimal, ask: Decimal) -> Decimal:
+    mid = (bid + ask) / Decimal("2")
+    if mid <= 0:
+        return Decimal("0")
+    return ((ask - bid) / mid) * Decimal("100")
+
+
+def _extract_estimated_unit_price(estimated_price_response: Any) -> Optional[Decimal]:
+    price_key_candidates = {
+        "estimated_price",
+        "price",
+        "ask_price",
+        "bid_price",
+        "price_inclusive_of_spread",
+    }
+
+    def _walk(node: Any) -> Optional[Decimal]:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in price_key_candidates or "price" in key:
+                    parsed = _to_decimal(value, default=Decimal("-1"))
+                    if parsed > 0:
+                        return parsed
+                nested = _walk(value)
+                if nested is not None and nested > 0:
+                    return nested
+        elif isinstance(node, list):
+            for item in node:
+                nested = _walk(item)
+                if nested is not None and nested > 0:
+                    return nested
+        return None
+
+    return _walk(estimated_price_response)
+
+
 def _append_audit_log(log_path: str, event: str, payload: Dict[str, Any]) -> None:
     directory = os.path.dirname(log_path)
     if directory:
@@ -399,7 +458,7 @@ def main() -> None:
     print(f"Using account: ****{account_number[-4:]}")
     print(
         f"Strategy config => symbol={config.symbol}, lookback={config.lookback_ticks}, "
-        f"threshold={config.momentum_threshold_pct}%"
+        f"threshold={config.momentum_threshold_pct}%, max_spread={config.max_spread_pct}%"
     )
     print(
         "Execution mode => "
@@ -427,8 +486,8 @@ def main() -> None:
 
     for iteration in range(1, config.max_iterations + 1):
         best_bid_ask = api_trading_client.get_best_bid_ask(config.symbol)
-        mid_price = _extract_mid_price(best_bid_ask, config.symbol)
-        if mid_price is None or mid_price <= 0:
+        bid_ask = _extract_bid_ask(best_bid_ask, config.symbol)
+        if bid_ask is None:
             print(f"[{iteration}] Unable to determine market price: {best_bid_ask}")
             _append_audit_log(
                 runtime.trade_audit_log_path,
@@ -437,6 +496,13 @@ def main() -> None:
             )
             time.sleep(config.poll_interval_seconds)
             continue
+        bid_price, ask_price = bid_ask
+        mid_price = (bid_price + ask_price) / Decimal("2")
+        if mid_price <= 0:
+            print(f"[{iteration}] Invalid market price from quote: bid={bid_price} ask={ask_price}")
+            time.sleep(config.poll_interval_seconds)
+            continue
+        spread_pct = _spread_pct(bid_price, ask_price)
 
         prices.append(mid_price)
         signal = _derive_signal(prices, config.momentum_threshold_pct)
@@ -444,6 +510,7 @@ def main() -> None:
         strategy_pnl_usd = realized_pnl_usd + unrealized_pnl_usd
         print(
             f"[{iteration}] Mid={mid_price} Signal={signal} "
+            f"Spread={spread_pct.quantize(Decimal('0.01'))}% "
             f"PnL=${strategy_pnl_usd.quantize(Decimal('0.01'))}"
         )
 
@@ -512,6 +579,26 @@ def main() -> None:
             time.sleep(config.poll_interval_seconds)
             continue
 
+        if spread_pct > config.max_spread_pct:
+            print(
+                f"[{iteration}] Skip trade: spread {spread_pct.quantize(Decimal('0.01'))}% "
+                f"above {config.max_spread_pct}% limit."
+            )
+            _append_audit_log(
+                runtime.trade_audit_log_path,
+                "trade_blocked_spread_limit",
+                {
+                    "iteration": iteration,
+                    "signal": signal,
+                    "bid_price": str(bid_price),
+                    "ask_price": str(ask_price),
+                    "spread_pct": str(spread_pct.quantize(Decimal("0.01"))),
+                    "max_spread_pct": str(config.max_spread_pct),
+                },
+            )
+            time.sleep(config.poll_interval_seconds)
+            continue
+
         holdings_response = api_trading_client.get_holdings(account_number, asset_code)
         asset_position = _extract_quantity(holdings_response, asset_code)
 
@@ -552,6 +639,51 @@ def main() -> None:
                 )
             else:
                 order_config = {"asset_quantity": _round_asset_quantity(asset_quantity)}
+                if config.require_estimated_price_check:
+                    estimated = api_trading_client.get_estimated_price(
+                        symbol=config.symbol,
+                        side="ask",
+                        quantity=order_config["asset_quantity"],
+                    )
+                    estimated_price = _extract_estimated_unit_price(estimated)
+                    if estimated_price is None:
+                        print(f"[{iteration}] Skip BUY: unable to validate estimated price: {estimated}")
+                        _append_audit_log(
+                            runtime.trade_audit_log_path,
+                            "trade_blocked_estimated_price_unavailable",
+                            {
+                                "iteration": iteration,
+                                "side": "buy",
+                                "signal": signal,
+                                "order_config": order_config,
+                                "estimated_response": estimated,
+                            },
+                        )
+                        time.sleep(config.poll_interval_seconds)
+                        continue
+                    estimated_deviation_pct = abs(_percent_move(estimated_price, mid_price))
+                    if estimated_deviation_pct > config.max_estimated_price_deviation_pct:
+                        print(
+                            f"[{iteration}] Skip BUY: estimated deviation "
+                            f"{estimated_deviation_pct.quantize(Decimal('0.01'))}% exceeds "
+                            f"{config.max_estimated_price_deviation_pct}%."
+                        )
+                        _append_audit_log(
+                            runtime.trade_audit_log_path,
+                            "trade_blocked_estimated_price_deviation",
+                            {
+                                "iteration": iteration,
+                                "side": "buy",
+                                "signal": signal,
+                                "mid_price": str(mid_price),
+                                "estimated_price": str(estimated_price),
+                                "estimated_deviation_pct": str(estimated_deviation_pct.quantize(Decimal("0.01"))),
+                                "max_estimated_price_deviation_pct": str(config.max_estimated_price_deviation_pct),
+                                "order_config": order_config,
+                            },
+                        )
+                        time.sleep(config.poll_interval_seconds)
+                        continue
                 if config.place_real_order:
                     order_response = api_trading_client.place_order(
                         account_number=account_number,
@@ -608,6 +740,51 @@ def main() -> None:
                 )
             else:
                 order_config = {"asset_quantity": _round_asset_quantity(asset_quantity)}
+                if config.require_estimated_price_check:
+                    estimated = api_trading_client.get_estimated_price(
+                        symbol=config.symbol,
+                        side="bid",
+                        quantity=order_config["asset_quantity"],
+                    )
+                    estimated_price = _extract_estimated_unit_price(estimated)
+                    if estimated_price is None:
+                        print(f"[{iteration}] Skip SELL: unable to validate estimated price: {estimated}")
+                        _append_audit_log(
+                            runtime.trade_audit_log_path,
+                            "trade_blocked_estimated_price_unavailable",
+                            {
+                                "iteration": iteration,
+                                "side": "sell",
+                                "signal": signal,
+                                "order_config": order_config,
+                                "estimated_response": estimated,
+                            },
+                        )
+                        time.sleep(config.poll_interval_seconds)
+                        continue
+                    estimated_deviation_pct = abs(_percent_move(estimated_price, mid_price))
+                    if estimated_deviation_pct > config.max_estimated_price_deviation_pct:
+                        print(
+                            f"[{iteration}] Skip SELL: estimated deviation "
+                            f"{estimated_deviation_pct.quantize(Decimal('0.01'))}% exceeds "
+                            f"{config.max_estimated_price_deviation_pct}%."
+                        )
+                        _append_audit_log(
+                            runtime.trade_audit_log_path,
+                            "trade_blocked_estimated_price_deviation",
+                            {
+                                "iteration": iteration,
+                                "side": "sell",
+                                "signal": signal,
+                                "mid_price": str(mid_price),
+                                "estimated_price": str(estimated_price),
+                                "estimated_deviation_pct": str(estimated_deviation_pct.quantize(Decimal("0.01"))),
+                                "max_estimated_price_deviation_pct": str(config.max_estimated_price_deviation_pct),
+                                "order_config": order_config,
+                            },
+                        )
+                        time.sleep(config.poll_interval_seconds)
+                        continue
                 if config.place_real_order:
                     order_response = api_trading_client.place_order(
                         account_number=account_number,
