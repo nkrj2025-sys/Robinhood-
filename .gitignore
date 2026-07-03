@@ -1,4 +1,15 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-.venv/
+*.py[cod]
+
+# Env
+.env
+
+# Virtual env
 venv/
+
+# Logs
+*.log
+
+# Pytest cache
+.pytest_cache/
