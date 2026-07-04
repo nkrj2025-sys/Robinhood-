@@ -10,6 +10,10 @@ import requests
 from nacl.signing import SigningKey
 
 
+DEFAULT_ORDER_SYMBOL = "BTC-USD"
+DEFAULT_ORDER_ASSET_QUANTITY = "0.000001"
+
+
 class CryptoAPITradingV2:
     def __init__(self, api_key: str, base64_private_key: str):
         if not api_key:
@@ -171,6 +175,40 @@ class CryptoAPITradingV2:
         return self.make_api_request("GET", path)
 
 
+def env_flag_enabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def get_order_config_from_env() -> Dict[str, str]:
+    raw_config = os.environ.get("ROBINHOOD_ORDER_CONFIG_JSON")
+    if raw_config:
+        try:
+            parsed_config = json.loads(raw_config)
+        except json.JSONDecodeError as error:
+            raise ValueError("ROBINHOOD_ORDER_CONFIG_JSON must be valid JSON.") from error
+
+        if not isinstance(parsed_config, dict):
+            raise ValueError("ROBINHOOD_ORDER_CONFIG_JSON must decode to an object.")
+
+        return {str(key): str(value) for key, value in parsed_config.items()}
+
+    order_config = {
+        "asset_quantity": os.environ.get(
+            "ROBINHOOD_ORDER_ASSET_QUANTITY", DEFAULT_ORDER_ASSET_QUANTITY
+        )
+    }
+
+    limit_price = os.environ.get("ROBINHOOD_ORDER_LIMIT_PRICE")
+    if limit_price:
+        order_config["limit_price"] = limit_price
+
+    stop_price = os.environ.get("ROBINHOOD_ORDER_STOP_PRICE")
+    if stop_price:
+        order_config["stop_price"] = stop_price
+
+    return order_config
+
+
 def main() -> None:
     api_key = os.environ.get("ROBINHOOD_API_KEY", "")
     base64_private_key = os.environ.get("ROBINHOOD_BASE64_PRIVATE_KEY", "")
@@ -189,24 +227,48 @@ def main() -> None:
     account_number = accounts["results"][0]["account_number"]
     print(f"Using account: ****{account_number[-4:]}")
 
-    trading_pairs = api_trading_client.get_trading_pairs("BTC-USD")
+    order_symbol = os.environ.get("ROBINHOOD_ORDER_SYMBOL", DEFAULT_ORDER_SYMBOL).upper()
+    order_side = os.environ.get("ROBINHOOD_ORDER_SIDE", "buy").lower()
+    order_type = os.environ.get("ROBINHOOD_ORDER_TYPE", "market").lower()
+    order_config = get_order_config_from_env()
+
+    if order_side not in {"buy", "sell"}:
+        raise ValueError("ROBINHOOD_ORDER_SIDE must be 'buy' or 'sell'.")
+
+    trading_pairs = api_trading_client.get_trading_pairs(order_symbol)
     print(f"Loaded trading pairs: {len(trading_pairs)}")
 
-    estimated_price = api_trading_client.get_estimated_price(
-        symbol="BTC-USD", side="both", quantity="0.000001"
-    )
-    print("Estimated price:")
-    print(json.dumps(estimated_price, indent=2))
+    asset_quantity = order_config.get("asset_quantity")
+    if asset_quantity:
+        estimated_price = api_trading_client.get_estimated_price(
+            symbol=order_symbol, side="both", quantity=asset_quantity
+        )
+        print("Estimated price:")
+        print(json.dumps(estimated_price, indent=2))
+    else:
+        print("Estimated price skipped: order config has no asset_quantity.")
 
-    place_real_order = os.environ.get("ROBINHOOD_PLACE_REAL_ORDER", "").lower() == "true"
-    if place_real_order:
+    print("Prepared order:")
+    print(
+        json.dumps(
+            {
+                "side": order_side,
+                "type": order_type,
+                "symbol": order_symbol,
+                f"{order_type}_order_config": order_config,
+            },
+            indent=2,
+        )
+    )
+
+    if env_flag_enabled("ROBINHOOD_PLACE_REAL_ORDER"):
         order_response = api_trading_client.place_order(
             account_number=account_number,
             client_order_id=str(uuid.uuid4()),
-            side="buy",
-            order_type="market",
-            symbol="BTC-USD",
-            order_config={"asset_quantity": "0.000001"},
+            side=order_side,
+            order_type=order_type,
+            symbol=order_symbol,
+            order_config=order_config,
         )
         print("Order response:")
         print(json.dumps(order_response, indent=2))
