@@ -8,7 +8,6 @@ import urllib.parse
 import uuid
 
 import requests
-from nacl.signing import SigningKey
 
 
 class CryptoAPITradingV2:
@@ -20,6 +19,14 @@ class CryptoAPITradingV2:
 
         self.api_key = api_key
         private_key_seed = base64.b64decode(base64_private_key)
+        try:
+            from nacl.signing import SigningKey
+        except ModuleNotFoundError as error:
+            raise RuntimeError(
+                "Missing dependency 'pynacl'. Install dependencies with "
+                "python3 -m pip install -r robinhood-api-trading/requirements.txt."
+            ) from error
+
         self.private_key = SigningKey(private_key_seed)
         self.base_url = "https://trading.robinhood.com"
         self.session = requests.Session()
