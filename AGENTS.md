@@ -22,7 +22,12 @@ an Ed25519 key (`pynacl`) and calls the REST API via `requests`.
   (it gets committed) — set them as Secrets/env vars instead.
 
 ### Network egress (non-obvious, important)
-- The live API host `trading.robinhood.com` IS reachable from the Cloud Agent VM.
+- Reachability of `trading.robinhood.com` depends on the Cloud Agent egress
+ allowlist for the session. If TLS connections are reset ("Connection reset by
+ peer" / `ConnectionResetError(104)`) while other hosts (e.g. pypi.org) work, the
+ host is being blocked by egress rules and must be added to the network allowlist.
+- When egress is allowed, the live API host `trading.robinhood.com` IS reachable
+ from the Cloud Agent VM.
   A signed request reaches the real API: with an invalid/ephemeral key it returns
   HTTP `401` ("An API credential matching the passed in api key was not found"),
   and an unsigned request returns HTTP `400` ("Request missing required headers").
