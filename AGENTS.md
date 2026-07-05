@@ -3,10 +3,11 @@
 ## Cursor Cloud specific instructions
 
 ### Overview
-This repo contains a Python client for the Robinhood Crypto Trading API. The main
-script is `robinhood-api-trading/robinhood_api_trading.py` (a second file,
-`robinhood_api_trading_v2.py`, is currently a placeholder). It signs requests with
-an Ed25519 key (`pynacl`) and calls the REST API via `requests`.
+This repo contains a Python client for the Robinhood Crypto Trading API. There are
+two scripts: `robinhood-api-trading/robinhood_api_trading.py` (v1) and
+`robinhood-api-trading/robinhood_api_trading_v2.py` (v2, a session-based client that
+hits the `/api/v2/...` endpoints and includes a small demo `main()`). Both sign
+requests with an Ed25519 key (`pynacl`) and call the REST API via `requests`.
 
 ### Runtime / commands
 - Use `python3` (there is no `python` on PATH).
@@ -22,11 +23,19 @@ an Ed25519 key (`pynacl`) and calls the REST API via `requests`.
   (it gets committed) — set them as Secrets/env vars instead.
 
 ### Network egress (non-obvious, important)
-- The live API host `trading.robinhood.com` IS reachable from the Cloud Agent VM.
-  A signed request reaches the real API: with an invalid/ephemeral key it returns
-  HTTP `401` ("An API credential matching the passed in api key was not found"),
-  and an unsigned request returns HTTP `400` ("Request missing required headers").
-- The full code path (key load → request signing → HTTPS call → API validation)
-  can be verified without real credentials by generating an ephemeral `SigningKey`
-  and confirming the API responds with a `401`; only a *successful authenticated*
-  response requires valid `ROBINHOOD_API_KEY` / `ROBINHOOD_BASE64_PRIVATE_KEY`.
+- Reaching the live API host `trading.robinhood.com` depends on the VM's egress
+ allowlist. It has been reachable in some sessions, but in others every TCP
+ connection is reset ("Connection reset by peer" / curl error 35). If you see this,
+ the domain likely needs to be added to the Cloud Agent network allowlist — it is
+ an egress restriction, not a code bug.
+- When the host IS reachable, a signed request reaches the real API: with an
+ invalid/ephemeral key it returns HTTP `401` ("An API credential matching the
+ passed in api key was not found"), and an unsigned request returns HTTP `400`
+ ("Request missing required headers").
+- The offline part of the code path (key load → request signing) can always be
+ verified without network access: instantiate the client with the injected
+ secrets and confirm `get_authorization_header(...)` produces an `x-signature`
+ that validates against `client.private_key.verify_key`. Only the *live HTTPS
+ call* requires egress to `trading.robinhood.com`, and only a *successful
+ authenticated* response requires valid `ROBINHOOD_API_KEY` /
+ `ROBINHOOD_BASE64_PRIVATE_KEY`.
