@@ -8,7 +8,6 @@ import urllib.parse
 import uuid
 
 import requests
-from nacl.signing import SigningKey
 
 
 LIVE_ORDER_CONFIRMATION = "PLACE LIVE ORDER"
@@ -23,6 +22,8 @@ class CryptoAPITradingV2:
 
         self.api_key = api_key
         private_key_seed = base64.b64decode(base64_private_key)
+        from nacl.signing import SigningKey
+
         self.private_key = SigningKey(private_key_seed)
         self.base_url = "https://trading.robinhood.com"
         self.session = requests.Session()
