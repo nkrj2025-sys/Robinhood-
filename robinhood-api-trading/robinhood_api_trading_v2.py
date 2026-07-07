@@ -3,6 +3,7 @@ import base64
 import datetime
 import json
 import os
+import sys
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import urllib.parse
 import uuid
@@ -415,5 +416,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         print_json("Fetched order status:", order_status)
 
 
+def cli(argv: Optional[Sequence[str]] = None) -> int:
+    try:
+        main(argv)
+    except (RuntimeError, ValueError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 2
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(cli())

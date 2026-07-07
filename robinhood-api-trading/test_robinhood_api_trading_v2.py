@@ -1,6 +1,9 @@
+import contextlib
+import io
 import importlib.util
 import pathlib
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = pathlib.Path(__file__).with_name("robinhood_api_trading_v2.py")
@@ -102,6 +105,20 @@ class OrderPlacementSafetyTests(unittest.TestCase):
             confirmation=module.LIVE_ORDER_CONFIRMATION,
             environ={"ROBINHOOD_PLACE_REAL_ORDER": "true"},
         )
+
+    def test_cli_reports_validation_errors_without_traceback(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with mock.patch.dict(module.os.environ, {}, clear=True):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = module.cli(
+                    ["--place", "--symbol", "BTC-USD", "--asset-quantity", "0.000001"]
+                )
+
+        self.assertEqual(exit_code, 2)
+        self.assertIn("Error: Live orders require", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
 
 
 if __name__ == "__main__":
