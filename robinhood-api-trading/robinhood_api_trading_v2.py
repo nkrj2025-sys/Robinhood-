@@ -380,13 +380,21 @@ def build_order_preview(
     payload: Dict[str, Any],
     live_order_enabled: bool,
 ) -> Dict[str, Any]:
-    query_params = CryptoAPITradingV2.get_query_params(
-        {"account_number": account_number or "<resolved before live order>"}
-    )
+    if account_number:
+        query_params = CryptoAPITradingV2.get_query_params(
+            {"account_number": account_number}
+        )
+        endpoint = f"/api/v2/crypto/trading/orders/{query_params}"
+    else:
+        endpoint = (
+            "/api/v2/crypto/trading/orders/"
+            "?account_number=<resolved before live order>"
+        )
+
     return {
         "mode": "live" if live_order_enabled else "dry_run",
         "account_number": mask_account_number(account_number),
-        "endpoint": f"/api/v2/crypto/trading/orders/{query_params}",
+        "endpoint": endpoint,
         "body": payload,
     }
 

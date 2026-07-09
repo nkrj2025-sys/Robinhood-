@@ -4,6 +4,7 @@ from robinhood_api_trading_v2 import (
     DEFAULT_ASSET_QUANTITY,
     build_order_config,
     build_order_payload,
+    build_order_preview,
     get_first_account_number,
     parse_args,
     should_place_real_order,
@@ -78,6 +79,23 @@ class OrderPayloadTests(unittest.TestCase):
                 symbol="BTC-USD",
                 order_config={"asset_quantity": "0.000001"},
             )
+
+
+class OrderPreviewTests(unittest.TestCase):
+    def test_keeps_unresolved_account_placeholder_readable(self):
+        preview = build_order_preview(
+            account_number=None,
+            payload={"client_order_id": "order-1"},
+            live_order_enabled=False,
+        )
+
+        self.assertEqual(
+            preview["endpoint"],
+            (
+                "/api/v2/crypto/trading/orders/"
+                "?account_number=<resolved before live order>"
+            ),
+        )
 
 
 class AccountResponseTests(unittest.TestCase):
