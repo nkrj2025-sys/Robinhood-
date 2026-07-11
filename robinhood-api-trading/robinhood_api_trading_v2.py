@@ -1,13 +1,17 @@
+import argparse
 import base64
 import datetime
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import urllib.parse
 import uuid
 
 import requests
-from nacl.signing import SigningKey
+
+
+DEFAULT_ORDER_SYMBOL = "BTC-USD"
+DEFAULT_ASSET_QUANTITY = "0.000001"
 
 
 class CryptoAPITradingV2:
@@ -19,6 +23,8 @@ class CryptoAPITradingV2:
 
         self.api_key = api_key
         private_key_seed = base64.b64decode(base64_private_key)
+        from nacl.signing import SigningKey
+
         self.private_key = SigningKey(private_key_seed)
         self.base_url = "https://trading.robinhood.com"
         self.session = requests.Session()
@@ -141,13 +147,13 @@ class CryptoAPITradingV2:
         symbol: str,
         order_config: Dict[str, str],
     ) -> Any:
-        body = {
-            "client_order_id": client_order_id,
-            "side": side,
-            "type": order_type,
-            "symbol": symbol,
-            f"{order_type}_order_config": order_config,
-        }
+        body = build_order_body(
+            client_order_id=client_order_id,
+            side=side,
+            order_type=order_type,
+            symbol=symbol,
+            order_config=order_config,
+        )
         body_json = json.dumps(body, separators=(",", ":"), sort_keys=True)
         params = {"account_number": account_number}
         query_params = self.get_query_params(params)
@@ -171,48 +177,170 @@ class CryptoAPITradingV2:
         return self.make_api_request("GET", path)
 
 
-def main() -> None:
+def build_market_order_config(
+    asset_quantity: Optional[str], quote_amount: Optional[str]
+) -> Dict[str, str]:
+    if bool(asset_quantity) == bool(quote_amount):
+        raise ValueError("Specify exactly one of asset_quantity or quote_amount.")
+
+    if asset_quantity:
+        return {"asset_quantity": asset_quantity}
+    return {"quote_amount": quote_amount or ""}
+
+
+def build_order_body(
+    client_order_id: str,
+    side: str,
+    order_type: str,
+    symbol: str,
+    order_config: Dict[str, str],
+) -> Dict[str, Any]:
+    return {
+        "client_order_id": client_order_id,
+        "side": side,
+        "type": order_type,
+        "symbol": symbol,
+        f"{order_type}_order_config": order_config,
+    }
+
+
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Preview or place a guarded Robinhood Crypto market order."
+    )
+    parser.add_argument(
+        "--symbol",
+        default=DEFAULT_ORDER_SYMBOL,
+        help=f"Trading pair symbol to order. Default: {DEFAULT_ORDER_SYMBOL}",
+    )
+    parser.add_argument(
+        "--side",
+        choices=("buy", "sell"),
+        default="buy",
+        help="Order side. Default: buy",
+    )
+    quantity_group = parser.add_mutually_exclusive_group()
+    quantity_group.add_argument(
+        "--asset-quantity",
+        help=f"Crypto asset quantity. Default: {DEFAULT_ASSET_QUANTITY}",
+    )
+    quantity_group.add_argument(
+        "--quote-amount",
+        help="USD quote amount for the market order instead of asset quantity.",
+    )
+    parser.add_argument(
+        "--client-order-id",
+        help="Client order UUID. Defaults to a newly generated UUID.",
+    )
+    parser.add_argument(
+        "--account-number",
+        help="Robinhood crypto account number. If omitted, the first account is used.",
+    )
+    parser.add_argument(
+        "--skip-estimate",
+        action="store_true",
+        help="Skip the estimated-price request before the live-order gate.",
+    )
+    parser.add_argument(
+        "--place-real-order",
+        action="store_true",
+        help=(
+            "Submit the order. For safety this must be combined with "
+            "ROBINHOOD_PLACE_REAL_ORDER=true."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def should_place_real_order(args: argparse.Namespace) -> bool:
+    return (
+        args.place_real_order
+        and os.environ.get("ROBINHOOD_PLACE_REAL_ORDER", "").lower() == "true"
+    )
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    args = parse_args(argv)
+    asset_quantity = args.asset_quantity
+    if not asset_quantity and not args.quote_amount:
+        asset_quantity = DEFAULT_ASSET_QUANTITY
+
+    client_order_id = args.client_order_id or str(uuid.uuid4())
+    order_config = build_market_order_config(
+        asset_quantity=asset_quantity, quote_amount=args.quote_amount
+    )
+    order_body = build_order_body(
+        client_order_id=client_order_id,
+        side=args.side,
+        order_type="market",
+        symbol=args.symbol,
+        order_config=order_config,
+    )
+
+    print("Prepared market order:")
+    print(json.dumps(order_body, indent=2))
+
     api_key = os.environ.get("ROBINHOOD_API_KEY", "")
     base64_private_key = os.environ.get("ROBINHOOD_BASE64_PRIVATE_KEY", "")
 
     if not api_key or not base64_private_key:
-        raise ValueError(
-            "Set ROBINHOOD_API_KEY and ROBINHOOD_BASE64_PRIVATE_KEY before running."
+        print(
+            "Dry run mode: set ROBINHOOD_API_KEY and "
+            "ROBINHOOD_BASE64_PRIVATE_KEY to fetch account data or place orders."
         )
+        return
 
-    api_trading_client = CryptoAPITradingV2(api_key=api_key, base64_private_key=base64_private_key)
+    api_trading_client = CryptoAPITradingV2(
+        api_key=api_key, base64_private_key=base64_private_key
+    )
 
-    accounts = api_trading_client.get_accounts()
-    if not isinstance(accounts, dict) or "results" not in accounts or not accounts["results"]:
-        raise RuntimeError(f"Unable to fetch accounts: {accounts}")
-
-    account_number = accounts["results"][0]["account_number"]
+    account_number = args.account_number
+    if not account_number:
+        accounts = api_trading_client.get_accounts()
+        if (
+            not isinstance(accounts, dict)
+            or "results" not in accounts
+            or not accounts["results"]
+        ):
+            raise RuntimeError(f"Unable to fetch accounts: {accounts}")
+        account_number = accounts["results"][0]["account_number"]
     print(f"Using account: ****{account_number[-4:]}")
 
-    trading_pairs = api_trading_client.get_trading_pairs("BTC-USD")
+    trading_pairs = api_trading_client.get_trading_pairs(args.symbol)
     print(f"Loaded trading pairs: {len(trading_pairs)}")
 
-    estimated_price = api_trading_client.get_estimated_price(
-        symbol="BTC-USD", side="both", quantity="0.000001"
-    )
-    print("Estimated price:")
-    print(json.dumps(estimated_price, indent=2))
+    if not args.skip_estimate and asset_quantity:
+        estimated_price = api_trading_client.get_estimated_price(
+            symbol=args.symbol, side="both", quantity=asset_quantity
+        )
+        print("Estimated price:")
+        print(json.dumps(estimated_price, indent=2))
+    elif not args.skip_estimate:
+        print("Skipping estimated price because quote amount was provided.")
 
-    place_real_order = os.environ.get("ROBINHOOD_PLACE_REAL_ORDER", "").lower() == "true"
-    if place_real_order:
+    if should_place_real_order(args):
         order_response = api_trading_client.place_order(
             account_number=account_number,
-            client_order_id=str(uuid.uuid4()),
-            side="buy",
+            client_order_id=client_order_id,
+            side=args.side,
             order_type="market",
-            symbol="BTC-USD",
-            order_config={"asset_quantity": "0.000001"},
+            symbol=args.symbol,
+            order_config=order_config,
         )
         print("Order response:")
         print(json.dumps(order_response, indent=2))
+    elif (
+        args.place_real_order
+        or os.environ.get("ROBINHOOD_PLACE_REAL_ORDER", "").lower() == "true"
+    ):
+        print(
+            "Dry run mode: live submission requires both --place-real-order "
+            "and ROBINHOOD_PLACE_REAL_ORDER=true."
+        )
     else:
         print(
-            "Dry run mode: set ROBINHOOD_PLACE_REAL_ORDER=true to place a live order."
+            "Dry run mode: add --place-real-order and set "
+            "ROBINHOOD_PLACE_REAL_ORDER=true to place a live order."
         )
 
 
