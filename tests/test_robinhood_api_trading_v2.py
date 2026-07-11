@@ -1,6 +1,8 @@
+import io
 import importlib.util
 import os
 from pathlib import Path
+import sys
 import unittest
 from unittest import mock
 
@@ -69,6 +71,29 @@ class OrderHelperTests(unittest.TestCase):
         args = robinhood_api_trading_v2.parse_args([])
         with mock.patch.dict(os.environ, {"ROBINHOOD_PLACE_REAL_ORDER": "true"}):
             self.assertFalse(robinhood_api_trading_v2.should_place_real_order(args))
+
+    def test_main_dry_run_does_not_construct_client_with_credentials(self) -> None:
+        env = {
+            "ROBINHOOD_API_KEY": "test-key",
+            "ROBINHOOD_BASE64_PRIVATE_KEY": "test-private-key",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(
+                robinhood_api_trading_v2, "CryptoAPITradingV2"
+            ) as client_class:
+                with mock.patch.object(sys, "stdout", new=io.StringIO()) as output:
+                    robinhood_api_trading_v2.main(
+                        [
+                            "--client-order-id",
+                            "order-id",
+                            "--asset-quantity",
+                            "0.000001",
+                        ]
+                    )
+
+        client_class.assert_not_called()
+        self.assertIn("Dry run mode", output.getvalue())
 
 
 if __name__ == "__main__":

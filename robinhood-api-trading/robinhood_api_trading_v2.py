@@ -237,6 +237,14 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Robinhood crypto account number. If omitted, the first account is used.",
     )
     parser.add_argument(
+        "--check-market",
+        action="store_true",
+        help=(
+            "Fetch account, trading-pair, and estimated-price data during a dry run. "
+            "Live orders always perform these checks."
+        ),
+    )
+    parser.add_argument(
         "--skip-estimate",
         action="store_true",
         help="Skip the estimated-price request before the live-order gate.",
@@ -280,6 +288,25 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print("Prepared market order:")
     print(json.dumps(order_body, indent=2))
 
+    live_order = should_place_real_order(args)
+    partial_live_confirmation = (
+        args.place_real_order
+        or os.environ.get("ROBINHOOD_PLACE_REAL_ORDER", "").lower() == "true"
+    )
+    if not args.check_market and not live_order:
+        if partial_live_confirmation:
+            print(
+                "Dry run mode: live submission requires both --place-real-order "
+                "and ROBINHOOD_PLACE_REAL_ORDER=true."
+            )
+        else:
+            print(
+                "Dry run mode: add --check-market to fetch Robinhood market data, "
+                "or add --place-real-order and set ROBINHOOD_PLACE_REAL_ORDER=true "
+                "to place a live order."
+            )
+        return
+
     api_key = os.environ.get("ROBINHOOD_API_KEY", "")
     base64_private_key = os.environ.get("ROBINHOOD_BASE64_PRIVATE_KEY", "")
 
@@ -318,7 +345,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     elif not args.skip_estimate:
         print("Skipping estimated price because quote amount was provided.")
 
-    if should_place_real_order(args):
+    if live_order:
         order_response = api_trading_client.place_order(
             account_number=account_number,
             client_order_id=client_order_id,
@@ -329,10 +356,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
         print("Order response:")
         print(json.dumps(order_response, indent=2))
-    elif (
-        args.place_real_order
-        or os.environ.get("ROBINHOOD_PLACE_REAL_ORDER", "").lower() == "true"
-    ):
+    elif partial_live_confirmation:
         print(
             "Dry run mode: live submission requires both --place-real-order "
             "and ROBINHOOD_PLACE_REAL_ORDER=true."
