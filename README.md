@@ -9,6 +9,14 @@ local shell.
 - `robinhood-api-trading/robinhood_api_trading_v2.py` - v2 client with a
   dry-run-first order workflow.
 
+## Setup
+
+Install runtime dependencies before using signed Robinhood API requests:
+
+```bash
+python3 -m pip install -r robinhood-api-trading/requirements.txt
+```
+
 ## Credentials
 
 The scripts read credentials from environment variables:
