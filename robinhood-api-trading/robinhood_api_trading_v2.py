@@ -23,7 +23,14 @@ class CryptoAPITradingV2:
 
         self.api_key = api_key
         private_key_seed = base64.b64decode(base64_private_key)
-        from nacl.signing import SigningKey
+        try:
+            from nacl.signing import SigningKey
+        except ImportError as error:
+            raise RuntimeError(
+                "PyNaCl is required for signed Robinhood requests. Install "
+                "dependencies with: python3 -m pip install -r "
+                "robinhood-api-trading/requirements.txt"
+            ) from error
 
         self.private_key = SigningKey(private_key_seed)
         self.base_url = "https://trading.robinhood.com"
@@ -185,7 +192,9 @@ def build_market_order_config(
 
     if asset_quantity:
         return {"asset_quantity": asset_quantity}
-    return {"quote_amount": quote_amount or ""}
+    if quote_amount is None:
+        raise ValueError("Specify quote_amount.")
+    return {"quote_amount": quote_amount}
 
 
 def build_order_body(
@@ -241,7 +250,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Fetch account, trading-pair, and estimated-price data during a dry run. "
-            "Live orders always perform these checks."
+            "Live orders always perform account and trading-pair checks."
         ),
     )
     parser.add_argument(
