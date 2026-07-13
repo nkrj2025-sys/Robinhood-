@@ -1,13 +1,17 @@
 # Robinhood Trading
 
-Python examples for calling the Robinhood Crypto Trading API from an agent or
-local shell.
+Python clients and command-line helpers for calling the Robinhood Crypto
+Trading API from an agent or local shell.
 
 ## Files
 
-- `robinhood-api-trading/robinhood_api_trading.py` - original v1 client sample.
-- `robinhood-api-trading/robinhood_api_trading_v2.py` - v2 client with a
-  dry-run-first order workflow.
+- `robinhood-api-trading/robinhood_api_trading.py` - primary CLI for account
+  connection checks, market data, holdings, order listing, guarded order
+  placement, and guarded cancellation.
+- `robinhood-api-trading/robinhood_api_trading_v2.py` - v2 market-order helper
+  with a dry-run-first workflow and optional market checks.
+- `tests/test_robinhood_api_trading_v2.py` - focused tests for the v2 order
+  helpers and live-order gate.
 
 ## Setup
 
@@ -19,17 +23,66 @@ python3 -m pip install -r robinhood-api-trading/requirements.txt
 
 ## Credentials
 
-The scripts read credentials from environment variables:
+Create API credentials in Robinhood, then provide them through environment
+variables. Do not hardcode real keys in this repository.
 
 ```bash
 export ROBINHOOD_API_KEY="your-api-key"
-export ROBINHOOD_BASE64_PRIVATE_KEY="base64-ed25519-private-key-seed"
+export ROBINHOOD_BASE64_PRIVATE_KEY="your-base64-ed25519-private-key-seed"
 ```
 
-Do not commit real keys to the repository. In Cursor Cloud, store them as
-Secrets or environment variables.
+In Cursor Cloud, store credentials as Secrets or environment variables.
 
-## How an agent places a crypto order
+## Primary CLI
+
+### Connect to the account
+
+Validate the credentials and fetch the crypto trading accounts:
+
+```bash
+python3 robinhood-api-trading/robinhood_api_trading.py connect
+```
+
+The command masks account numbers in its output.
+
+### Market data
+
+```bash
+python3 robinhood-api-trading/robinhood_api_trading.py quote BTC-USD
+python3 robinhood-api-trading/robinhood_api_trading.py estimate BTC-USD --side both --quantity 0.0001
+python3 robinhood-api-trading/robinhood_api_trading.py holdings --asset-code BTC
+```
+
+### Orders
+
+Order commands dry-run by default and print the payload that would be sent:
+
+```bash
+python3 robinhood-api-trading/robinhood_api_trading.py order \
+  --symbol BTC-USD \
+  --side buy \
+  --order-type market \
+  --asset-quantity 0.0001
+```
+
+To place a live order, both safeguards must be present:
+
+```bash
+ROBINHOOD_PLACE_REAL_ORDER=true \
+python3 robinhood-api-trading/robinhood_api_trading.py order \
+  --symbol BTC-USD \
+  --side buy \
+  --order-type market \
+  --asset-quantity 0.0001 \
+  --confirm-live-trade
+```
+
+Canceling an order also requires `ROBINHOOD_PLACE_REAL_ORDER=true` and
+`--confirm-live-trade`.
+
+## V2 market-order helper
+
+### How an agent places a crypto order
 
 The v2 script is intentionally guarded so an agent can show the order it would
 place before it sends anything to Robinhood.
