@@ -3,16 +3,22 @@
 ## Cursor Cloud specific instructions
 
 ### Overview
-This repo contains a Python client for the Robinhood Crypto Trading API. The main
-script is `robinhood-api-trading/robinhood_api_trading.py` (a second file,
-`robinhood_api_trading_v2.py`, is currently a placeholder). It signs requests with
-an Ed25519 key (`pynacl`) and calls the REST API via `requests`.
+This repo contains a Python client for the Robinhood Crypto Trading API. There are
+two runnable scripts in `robinhood-api-trading/`: `robinhood_api_trading.py` (the v1
+`/api/v1/...` client) and `robinhood_api_trading_v2.py` (a fuller v2 `/api/v2/...`
+client with pagination and a safer dry-run `main()`). Both sign requests with an
+Ed25519 key (`pynacl`) and call the REST API via `requests`.
 
 ### Runtime / commands
 - Use `python3` (there is no `python` on PATH).
 - Dependencies: `requests`, `pynacl` (see `robinhood-api-trading/requirements.txt`).
   These are installed by the update script; no manual install needed at session start.
-- Run the app: `python3 robinhood-api-trading/robinhood_api_trading.py`.
+- Run v1: `python3 robinhood-api-trading/robinhood_api_trading.py`.
+- Run v2: `python3 robinhood-api-trading/robinhood_api_trading_v2.py`. v2 requires both
+ env vars to be set (it raises `ValueError` otherwise) and runs in dry-run mode; it
+ only places a live order when `ROBINHOOD_PLACE_REAL_ORDER=true`.
+- There are no lint or automated-test configs in this repo; validate with
+ `python3 -m py_compile robinhood-api-trading/*.py`.
 
 ### Credentials (non-obvious)
 - `robinhood_api_trading.py` reads credentials from environment variables:
@@ -20,6 +26,20 @@ an Ed25519 key (`pynacl`) and calls the REST API via `requests`.
   seed). It falls back to literal placeholder strings if unset, in which case
   `main()` fails at `base64.b64decode(...)`. Do NOT hardcode real keys into the file
   (it gets committed) — set them as Secrets/env vars instead.
+
+### Docker (non-obvious, important)
+- Docker CE + Compose plugin are installed at the system level (captured in the VM
+ snapshot), so they are NOT part of the update script. The repo itself does not use
+ Docker; it's available as a general dev tool.
+- The daemon is NOT auto-started (there is no systemd/service manager in the VM).
+ Start it manually and leave it running, e.g. in a background/tmux session:
+ `sudo dockerd > /tmp/dockerd.log 2>&1 &`.
+- DinD requires two workarounds already configured: `storage-driver: fuse-overlayfs`
+ in `/etc/docker/daemon.json`, and `iptables`/`ip6tables` set to `-legacy` (container
+ port publishing/NAT fails otherwise). If Docker 29+ is ever installed, also disable
+ the `containerd-snapshotter` feature to keep fuse-overlayfs working.
+- The `ubuntu` user is in the `docker` group, but that membership is not active in an
+ already-open shell; use `sudo docker ...` in the current session (or a fresh login).
 
 ### Network egress (non-obvious, important)
 - The live API host `trading.robinhood.com` IS reachable from the Cloud Agent VM.
