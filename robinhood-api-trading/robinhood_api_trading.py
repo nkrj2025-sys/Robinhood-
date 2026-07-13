@@ -171,7 +171,7 @@ class CryptoAPITrading:
         side: str,
         order_type: str,
         symbol: str,
-        order_config: Dict[str, str],
+        order_config: Dict[str, Any],
     ) -> Dict[str, Any]:
         return {
             "client_order_id": client_order_id,
@@ -187,7 +187,7 @@ class CryptoAPITrading:
         side: str,
         order_type: str,
         symbol: str,
-        order_config: Dict[str, str],
+        order_config: Dict[str, Any],
     ) -> Any:
         body = self.build_order_body(
             client_order_id=client_order_id,
@@ -242,7 +242,7 @@ def redact_account_numbers(value: Any) -> Any:
     return value
 
 
-def build_order_config(args: argparse.Namespace) -> Dict[str, str]:
+def build_order_config(args: argparse.Namespace) -> Dict[str, Any]:
     if args.order_config_json:
         try:
             order_config = json.loads(args.order_config_json)
@@ -250,9 +250,11 @@ def build_order_config(args: argparse.Namespace) -> Dict[str, str]:
             raise ValueError("--order-config-json must be valid JSON") from error
         if not isinstance(order_config, dict):
             raise ValueError("--order-config-json must decode to a JSON object")
-        return {str(key): str(value) for key, value in order_config.items()}
+        if not order_config or any(value == "" for value in order_config.values()):
+            raise ValueError("--order-config-json must contain non-empty values")
+        return order_config
 
-    order_config: Dict[str, str] = {}
+    order_config: Dict[str, Any] = {}
     for key in (
         "asset_quantity",
         "quote_amount",
