@@ -1,5 +1,6 @@
 import io
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
@@ -50,6 +51,54 @@ class OrderHelperTests(unittest.TestCase):
 
         self.assertEqual(
             body,
+            {
+                "client_order_id": "order-id",
+                "side": "buy",
+                "type": "market",
+                "symbol": "BTC-USD",
+                "market_order_config": {"asset_quantity": "0.000001"},
+            },
+        )
+
+    def test_find_trading_pair_requires_requested_symbol(self) -> None:
+        trading_pairs = [
+            {"symbol": "ETH-USD"},
+            {"symbol": "BTC-USD", "min_order_size": "0.000001"},
+        ]
+
+        self.assertEqual(
+            robinhood_api_trading_v2.find_trading_pair(trading_pairs, "BTC-USD"),
+            {"symbol": "BTC-USD", "min_order_size": "0.000001"},
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "DOGE-USD"):
+            robinhood_api_trading_v2.find_trading_pair(trading_pairs, "DOGE-USD")
+
+    def test_place_order_posts_v2_account_scoped_market_order(self) -> None:
+        client = robinhood_api_trading_v2.CryptoAPITradingV2.__new__(
+            robinhood_api_trading_v2.CryptoAPITradingV2
+        )
+        client.make_api_request = mock.Mock(return_value={"state": "queued"})
+
+        response = client.place_order(
+            account_number="account-123",
+            client_order_id="order-id",
+            side="buy",
+            order_type="market",
+            symbol="BTC-USD",
+            order_config={"asset_quantity": "0.000001"},
+        )
+
+        self.assertEqual(response, {"state": "queued"})
+        client.make_api_request.assert_called_once()
+        method, path, body = client.make_api_request.call_args.args
+        self.assertEqual(method, "POST")
+        self.assertEqual(
+            path,
+            "/api/v2/crypto/trading/orders/?account_number=account-123",
+        )
+        self.assertEqual(
+            json.loads(body),
             {
                 "client_order_id": "order-id",
                 "side": "buy",
