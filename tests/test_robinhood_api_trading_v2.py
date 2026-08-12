@@ -1,5 +1,6 @@
 import io
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
@@ -58,6 +59,64 @@ class OrderHelperTests(unittest.TestCase):
                 "market_order_config": {"asset_quantity": "0.000001"},
             },
         )
+
+    def test_find_trading_pair_returns_matching_symbol(self) -> None:
+        trading_pair = robinhood_api_trading_v2.find_trading_pair(
+            [
+                {"symbol": "ETH-USD", "id": "eth-pair"},
+                {"symbol": "BTC-USD", "id": "btc-pair"},
+            ],
+            "BTC-USD",
+        )
+
+        self.assertEqual(trading_pair["id"], "btc-pair")
+
+    def test_find_trading_pair_raises_when_symbol_missing(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "BTC-USD"):
+            robinhood_api_trading_v2.find_trading_pair(
+                [{"symbol": "ETH-USD", "id": "eth-pair"}],
+                "BTC-USD",
+            )
+
+    def test_place_order_posts_account_scoped_v2_payload(self) -> None:
+        calls = []
+        client = robinhood_api_trading_v2.CryptoAPITradingV2.__new__(
+            robinhood_api_trading_v2.CryptoAPITradingV2
+        )
+
+        def fake_make_api_request(method: str, path: str, body: str = ""):
+            calls.append((method, path, body))
+            return {"id": "order-id"}
+
+        client.make_api_request = fake_make_api_request
+
+        response = client.place_order(
+            account_number="acct-123",
+            client_order_id="client-order-id",
+            side="buy",
+            order_type="market",
+            symbol="BTC-USD",
+            order_config={"asset_quantity": "0.000001"},
+        )
+
+        self.assertEqual(response, {"id": "order-id"})
+        self.assertEqual(len(calls), 1)
+        method, path, body = calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(
+            path, "/api/v2/crypto/trading/orders/?account_number=acct-123"
+        )
+        self.assertEqual(
+            json.loads(body),
+            {
+                "client_order_id": "client-order-id",
+                "side": "buy",
+                "type": "market",
+                "symbol": "BTC-USD",
+                "market_order_config": {"asset_quantity": "0.000001"},
+            },
+        )
+        self.assertNotIn(" ", body)
 
     def test_should_place_real_order_requires_flag_and_environment(self) -> None:
         args = robinhood_api_trading_v2.parse_args(["--place-real-order"])

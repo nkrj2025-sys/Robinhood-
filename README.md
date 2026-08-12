@@ -42,8 +42,8 @@ place before it sends anything to Robinhood.
    - `market_order_config` - either `asset_quantity` or `quote_amount`.
 2. Sign the request with the Ed25519 private key from
    `ROBINHOOD_BASE64_PRIVATE_KEY`.
-3. Optionally resolve the crypto account number and fetch trading-pair and
-   estimated-price data with `--check-market`.
+3. Optionally resolve the crypto account number, verify Robinhood returns the
+   requested trading pair, and fetch estimated-price data with `--check-market`.
 4. Submit `POST /api/v2/crypto/trading/orders/?account_number=...` only when
    both live-order confirmations are present.
 
@@ -71,8 +71,8 @@ python3 robinhood-api-trading/robinhood_api_trading_v2.py \
 
 ## Live order submission
 
-With credentials set, add `--check-market` to fetch the account, trading pair,
-and estimated price without placing an order:
+With credentials set, add `--check-market` to fetch the account, verify the
+requested trading pair, and estimate price without placing an order:
 
 ```bash
 python3 robinhood-api-trading/robinhood_api_trading_v2.py \
