@@ -44,7 +44,9 @@ place before it sends anything to Robinhood.
    `ROBINHOOD_BASE64_PRIVATE_KEY`.
 3. Optionally resolve the crypto account number and fetch trading-pair and
    estimated-price data with `--check-market`.
-4. Submit `POST /api/v2/crypto/trading/orders/?account_number=...` only when
+4. Validate that Robinhood returns the exact requested trading pair before any
+   live submission.
+5. Submit `POST /api/v2/crypto/trading/orders/?account_number=...` only when
    both live-order confirmations are present.
 
 ## Dry-run preview
@@ -99,6 +101,7 @@ the script remains in dry-run mode.
 ## MCP note
 
 This repository also contains `.cursor/mcp.json` for a local Postgres MCP server.
-That server is unrelated to Robinhood order placement. If an agent is using
-Robinhood brokerage MCP tools, use review tools before place tools and require
-explicit user confirmation before any live trade.
+That server is unrelated to Robinhood order placement. This script places crypto
+orders through signed HTTPS requests to `trading.robinhood.com`. If an agent is
+using Robinhood brokerage MCP tools instead, use review tools before place tools
+and require explicit user confirmation before any live trade.
