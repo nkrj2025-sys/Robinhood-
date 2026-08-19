@@ -59,6 +59,47 @@ class OrderHelperTests(unittest.TestCase):
             },
         )
 
+    def test_find_trading_pair_returns_requested_symbol(self) -> None:
+        trading_pairs = [
+            {"symbol": "ETH-USD"},
+            {"symbol": "BTC-USD", "min_order_size": "0.000001"},
+        ]
+
+        self.assertIs(
+            robinhood_api_trading_v2.find_trading_pair("BTC-USD", trading_pairs),
+            trading_pairs[1],
+        )
+
+    def test_find_trading_pair_requires_requested_symbol(self) -> None:
+        with self.assertRaisesRegex(ValueError, "BTC-USD"):
+            robinhood_api_trading_v2.find_trading_pair(
+                "BTC-USD", [{"symbol": "ETH-USD"}]
+            )
+
+    def test_place_order_posts_account_scoped_v2_payload(self) -> None:
+        client = object.__new__(robinhood_api_trading_v2.CryptoAPITradingV2)
+        client.make_api_request = mock.Mock(return_value={"id": "order-id"})
+
+        response = client.place_order(
+            account_number="acct-123",
+            client_order_id="order-id",
+            side="buy",
+            order_type="market",
+            symbol="BTC-USD",
+            order_config={"asset_quantity": "0.000001"},
+        )
+
+        self.assertEqual(response, {"id": "order-id"})
+        client.make_api_request.assert_called_once_with(
+            "POST",
+            "/api/v2/crypto/trading/orders/?account_number=acct-123",
+            (
+                '{"client_order_id":"order-id",'
+                '"market_order_config":{"asset_quantity":"0.000001"},'
+                '"side":"buy","symbol":"BTC-USD","type":"market"}'
+            ),
+        )
+
     def test_should_place_real_order_requires_flag_and_environment(self) -> None:
         args = robinhood_api_trading_v2.parse_args(["--place-real-order"])
 
