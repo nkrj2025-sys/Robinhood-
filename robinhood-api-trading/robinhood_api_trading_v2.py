@@ -213,6 +213,26 @@ def build_order_body(
     }
 
 
+def find_trading_pair(
+    symbol: str, trading_pairs: Sequence[Dict[str, Any]]
+) -> Dict[str, Any]:
+    for trading_pair in trading_pairs:
+        if trading_pair.get("symbol") == symbol:
+            return trading_pair
+
+    available_symbols = [
+        str(trading_pair["symbol"])
+        for trading_pair in trading_pairs
+        if "symbol" in trading_pair
+    ]
+    suffix = (
+        f" Available symbols: {', '.join(available_symbols[:5])}."
+        if available_symbols
+        else ""
+    )
+    raise ValueError(f"Robinhood did not return trading pair {symbol}.{suffix}")
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Preview or place a guarded Robinhood Crypto market order."
@@ -278,6 +298,7 @@ def should_place_real_order(args: argparse.Namespace) -> bool:
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parse_args(argv)
+    symbol = args.symbol.upper()
     asset_quantity = args.asset_quantity
     if not asset_quantity and not args.quote_amount:
         asset_quantity = DEFAULT_ASSET_QUANTITY
@@ -290,7 +311,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         client_order_id=client_order_id,
         side=args.side,
         order_type="market",
-        symbol=args.symbol,
+        symbol=symbol,
         order_config=order_config,
     )
 
@@ -342,12 +363,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         account_number = accounts["results"][0]["account_number"]
     print(f"Using account: ****{account_number[-4:]}")
 
-    trading_pairs = api_trading_client.get_trading_pairs(args.symbol)
-    print(f"Loaded trading pairs: {len(trading_pairs)}")
+    trading_pairs = api_trading_client.get_trading_pairs(symbol)
+    trading_pair = find_trading_pair(symbol, trading_pairs)
+    print(f"Validated trading pair: {trading_pair['symbol']}")
 
     if not args.skip_estimate and asset_quantity:
         estimated_price = api_trading_client.get_estimated_price(
-            symbol=args.symbol, side="both", quantity=asset_quantity
+            symbol=symbol, side="both", quantity=asset_quantity
         )
         print("Estimated price:")
         print(json.dumps(estimated_price, indent=2))
@@ -360,7 +382,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             client_order_id=client_order_id,
             side=args.side,
             order_type="market",
-            symbol=args.symbol,
+            symbol=symbol,
             order_config=order_config,
         )
         print("Order response:")
