@@ -43,7 +43,8 @@ place before it sends anything to Robinhood.
 2. Sign the request with the Ed25519 private key from
    `ROBINHOOD_BASE64_PRIVATE_KEY`.
 3. Optionally resolve the crypto account number and fetch trading-pair and
-   estimated-price data with `--check-market`.
+   estimated-price data with `--check-market`. The live/check path verifies
+   Robinhood returned the requested trading pair before continuing.
 4. Submit `POST /api/v2/crypto/trading/orders/?account_number=...` only when
    both live-order confirmations are present.
 
