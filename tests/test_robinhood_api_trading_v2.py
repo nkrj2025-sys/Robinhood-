@@ -59,6 +59,31 @@ class OrderHelperTests(unittest.TestCase):
             },
         )
 
+    def test_require_trading_pair_returns_matching_pair(self) -> None:
+        matching_pair = {"symbol": "BTC-USD", "status": "active"}
+
+        self.assertIs(
+            robinhood_api_trading_v2.require_trading_pair(
+                "BTC-USD",
+                [
+                    {"symbol": "ETH-USD"},
+                    matching_pair,
+                ],
+            ),
+            matching_pair,
+        )
+
+    def test_require_trading_pair_raises_when_symbol_is_missing(self) -> None:
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Trading pair BTC-USD was not returned by Robinhood. "
+            "Returned symbols: ETH-USD",
+        ):
+            robinhood_api_trading_v2.require_trading_pair(
+                "BTC-USD",
+                [{"symbol": "ETH-USD"}, {"name": "missing-symbol"}],
+            )
+
     def test_should_place_real_order_requires_flag_and_environment(self) -> None:
         args = robinhood_api_trading_v2.parse_args(["--place-real-order"])
 
