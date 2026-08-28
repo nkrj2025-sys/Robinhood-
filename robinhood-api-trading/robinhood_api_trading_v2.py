@@ -213,6 +213,24 @@ def build_order_body(
     }
 
 
+def require_trading_pair(
+    symbol: str, trading_pairs: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    for trading_pair in trading_pairs:
+        if trading_pair.get("symbol") == symbol:
+            return trading_pair
+
+    available_symbols = sorted(
+        str(trading_pair["symbol"])
+        for trading_pair in trading_pairs
+        if trading_pair.get("symbol")
+    )
+    detail = (
+        f" Returned symbols: {', '.join(available_symbols)}" if available_symbols else ""
+    )
+    raise RuntimeError(f"Trading pair {symbol} was not returned by Robinhood.{detail}")
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Preview or place a guarded Robinhood Crypto market order."
@@ -343,7 +361,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print(f"Using account: ****{account_number[-4:]}")
 
     trading_pairs = api_trading_client.get_trading_pairs(args.symbol)
-    print(f"Loaded trading pairs: {len(trading_pairs)}")
+    require_trading_pair(args.symbol, trading_pairs)
+    print(f"Loaded trading pair: {args.symbol}")
 
     if not args.skip_estimate and asset_quantity:
         estimated_price = api_trading_client.get_estimated_price(
