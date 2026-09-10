@@ -59,6 +59,22 @@ class OrderHelperTests(unittest.TestCase):
             },
         )
 
+    def test_require_trading_pair_returns_exact_symbol(self) -> None:
+        trading_pair = {"symbol": "BTC-USD", "status": "tradable"}
+
+        self.assertIs(
+            robinhood_api_trading_v2.require_trading_pair(
+                [{"symbol": "ETH-USD"}, trading_pair], "BTC-USD"
+            ),
+            trading_pair,
+        )
+
+    def test_require_trading_pair_raises_when_symbol_is_absent(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "BTC-USD"):
+            robinhood_api_trading_v2.require_trading_pair(
+                [{"symbol": "ETH-USD"}], "BTC-USD"
+            )
+
     def test_should_place_real_order_requires_flag_and_environment(self) -> None:
         args = robinhood_api_trading_v2.parse_args(["--place-real-order"])
 
@@ -94,6 +110,37 @@ class OrderHelperTests(unittest.TestCase):
 
         client_class.assert_not_called()
         self.assertIn("Dry run mode", output.getvalue())
+
+    def test_main_check_market_requires_requested_trading_pair(self) -> None:
+        env = {
+            "ROBINHOOD_API_KEY": "test-key",
+            "ROBINHOOD_BASE64_PRIVATE_KEY": "test-private-key",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(
+                robinhood_api_trading_v2, "CryptoAPITradingV2"
+            ) as client_class:
+                client = client_class.return_value
+                client.get_accounts.return_value = {
+                    "results": [{"account_number": "acct-1234"}]
+                }
+                client.get_trading_pairs.return_value = [{"symbol": "ETH-USD"}]
+
+                with mock.patch.object(sys, "stdout", new=io.StringIO()):
+                    with self.assertRaisesRegex(RuntimeError, "BTC-USD"):
+                        robinhood_api_trading_v2.main(
+                            [
+                                "--client-order-id",
+                                "order-id",
+                                "--asset-quantity",
+                                "0.000001",
+                                "--check-market",
+                            ]
+                        )
+
+        client.get_estimated_price.assert_not_called()
+        client.place_order.assert_not_called()
 
 
 if __name__ == "__main__":
