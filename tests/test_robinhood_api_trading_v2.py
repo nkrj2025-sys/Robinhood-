@@ -127,16 +127,17 @@ class OrderHelperTests(unittest.TestCase):
                 }
                 client.get_trading_pairs.return_value = [{"symbol": "ETH-USD"}]
 
-                with self.assertRaisesRegex(RuntimeError, "BTC-USD"):
-                    robinhood_api_trading_v2.main(
-                        [
-                            "--client-order-id",
-                            "order-id",
-                            "--asset-quantity",
-                            "0.000001",
-                            "--check-market",
-                        ]
-                    )
+                with mock.patch.object(sys, "stdout", new=io.StringIO()):
+                    with self.assertRaisesRegex(RuntimeError, "BTC-USD"):
+                        robinhood_api_trading_v2.main(
+                            [
+                                "--client-order-id",
+                                "order-id",
+                                "--asset-quantity",
+                                "0.000001",
+                                "--check-market",
+                            ]
+                        )
 
         client.get_estimated_price.assert_not_called()
         client.place_order.assert_not_called()
